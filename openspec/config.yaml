@@ -1,20 +1,24 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  Source of truth: the repository README; conflicts are resolved in its favor.
+  Stack: Bun 1.x, strict TypeScript, NestJS 10, MikroORM 7, PostgreSQL 16,
+  AWS SQS through LocalStack 3.8.1, Docker Compose and bun:test.
+  Financial values are decimal strings in code and NUMERIC(18,2) in PostgreSQL.
+  Correctness must hold across at least three application processes.
+  Authentication is intentionally deferred to an external IdP through a no-op seam.
+  Architectural decisions live in docs/adr and canonical language lives in GLOSSARY.md.
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+rules:
+  proposal:
+    - Name the README sections and elimination risks addressed.
+    - Keep authentication, double-entry bookkeeping and load testing out of scope.
+  specs:
+    - Every mandatory README behavior must have at least one executable scenario.
+    - Use stable machine-readable outcomes and decimal strings in examples.
+  design:
+    - Link decisions to docs/adr instead of duplicating their rationale.
+    - State the PostgreSQL constraint or test that enforces each financial guarantee.
+  tasks:
+    - Order work as green vertical slices with verification before each commit.
+    - Reference the requirement and test evidence produced by each task.
