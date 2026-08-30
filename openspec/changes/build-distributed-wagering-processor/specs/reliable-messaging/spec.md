@@ -1,83 +1,83 @@
 ## ADDED Requirements
 
-### Requirement: Consume SQS commands through the shared processor
-The SQS consumer MUST validate the same business contract as HTTP, MUST call `ProcessWager`, MUST long-poll up to ten messages for 20 seconds with configurable visibility, and MUST process Wallet groups concurrently while preserving order within a Wallet group.
+### Requirement: Consumir comandos SQS pelo processador compartilhado
+O consumidor SQS DEVE (`MUST`) validar o mesmo contrato de negócio do HTTP, DEVE chamar `ProcessWager`, DEVE fazer sondagem longa de até dez mensagens por 20 segundos com visibilidade configurável e DEVE processar grupos de Wallet concorrentemente, preservando a ordem dentro de cada grupo.
 
-#### Scenario: Valid queued command
-- **WHEN** a valid `WagerTransactionRequested` message is received
-- **THEN** the shared processor produces the same persisted outcome as the equivalent HTTP command and acknowledgement occurs only after commit
+#### Scenario: Comando válido na fila
+- **WHEN** uma mensagem `WagerTransactionRequested` válida é recebida
+- **THEN** o processador compartilhado produz o mesmo resultado persistido do comando HTTP equivalente, e a confirmação ocorre somente depois da confirmação no banco
 
-#### Scenario: Concurrent Wallet groups
-- **WHEN** one receive batch contains messages for different Wallet groups
-- **THEN** groups can progress concurrently while messages sharing a `walletId` remain sequential
+#### Scenario: Grupos de Wallet concorrentes
+- **WHEN** um lote recebido contém mensagens para grupos diferentes de Wallet
+- **THEN** os grupos podem avançar concorrentemente, enquanto mensagens com a mesma `walletId` permanecem sequenciais
 
-### Requirement: Deduplicate delivery with a transactional Inbox
-The consumer MUST claim `(consumerName,messageId)` in PostgreSQL inside the same transaction as the business effect, MUST compare payload hashes for an existing message, and MUST remain safe when a duplicate uses a new SQS receipt handle.
+### Requirement: Deduplicar entregas com Inbox transacional
+O consumidor DEVE (`MUST`) disputar `(consumerName,messageId)` no PostgreSQL dentro da mesma transação do efeito de negócio, DEVE comparar hashes de conteúdo para uma mensagem existente e DEVE permanecer seguro quando uma duplicata usa um novo identificador de recebimento do SQS.
 
-#### Scenario: Identical redelivery
-- **WHEN** a processed message is delivered again with the same message and payload hash
-- **THEN** no business effect repeats and the current receipt handle is acknowledged
+#### Scenario: Reentrega idêntica
+- **WHEN** uma mensagem processada é entregue novamente com o mesmo identificador e hash de conteúdo
+- **THEN** nenhum efeito de negócio se repete e o identificador de recebimento atual é confirmado
 
-#### Scenario: Conflicting message identity
-- **WHEN** an existing message identifier is reused with a different payload hash
-- **THEN** no financial state changes and the permanent conflict is retried only for DLQ redrive
+#### Scenario: Identidade de mensagem conflitante
+- **WHEN** um identificador de mensagem existente é reutilizado com outro hash de conteúdo
+- **THEN** nenhum estado financeiro muda e o conflito permanente só é repetido para redirecionamento à DLQ
 
-#### Scenario: New message identity with existing wager key
-- **WHEN** a redelivery carries a new message identifier but an already processed wager idempotency key
-- **THEN** Inbox records the new delivery, wager replay prevents a second effect, and the message is acknowledged after commit
+#### Scenario: Nova identidade de mensagem com chave de aposta existente
+- **WHEN** uma reentrega contém um novo identificador de mensagem, mas uma chave de idempotência de aposta já processada
+- **THEN** a Inbox registra a nova entrega, a reprodução da aposta impede um segundo efeito e a mensagem é confirmada depois da confirmação no banco
 
-### Requirement: Classify failures for acknowledgement and redrive
-Business outcomes and identical duplicates MUST be acknowledged; invalid or permanently conflicting messages MUST remain unacknowledged for a five-receive DLQ policy; transient infrastructure failures MUST remain unacknowledged for retry.
+### Requirement: Classificar falhas para confirmação e redirecionamento
+Resultados de negócio e duplicatas idênticas DEVEM (`MUST`) ser confirmados; mensagens inválidas ou permanentemente conflitantes DEVEM permanecer sem confirmação para a política de DLQ após cinco recebimentos; falhas transitórias de infraestrutura DEVEM permanecer sem confirmação para nova tentativa.
 
-#### Scenario: Invalid message reaches DLQ
-- **WHEN** a malformed message is received five times without acknowledgement
-- **THEN** LocalStack redrives it to `wager-transactions-dlq.fifo`, the DLQ metric reflects the queued message and no financial row is created
+#### Scenario: Mensagem inválida chega à DLQ
+- **WHEN** uma mensagem malformada é recebida cinco vezes sem confirmação
+- **THEN** o LocalStack a redireciona para `wager-transactions-dlq.fifo`, a métrica da DLQ reflete a mensagem enfileirada e nenhuma linha financeira é criada
 
-#### Scenario: Business rejection is acknowledged
-- **WHEN** a valid queued BET is rejected for insufficient balance
-- **THEN** the REJECTED transaction and Outbox event commit and the message is deleted
+#### Scenario: Rejeição de negócio é confirmada
+- **WHEN** uma BET válida recebida pela fila é rejeitada por saldo insuficiente
+- **THEN** a transação REJECTED e o evento da Outbox são confirmados no banco e a mensagem é excluída
 
-### Requirement: Recover references delivered out of order
-A missing valid reference MUST persist the transaction as PENDING_REFERENCE, MUST enqueue `WagerTransactionPendingReference`, and MUST be reconsidered with configurable exponential backoff until success or exhaustion.
+### Requirement: Recuperar referências entregues fora de ordem
+Uma referência válida ausente DEVE (`MUST`) persistir a transação como PENDING_REFERENCE, DEVE enfileirar `WagerTransactionPendingReference` e DEVE ser reconsiderada com espera exponencial configurável até o sucesso ou esgotamento.
 
-#### Scenario: Reference arrives later
-- **WHEN** a REFUND arrives before its BET and the BET commits before a scheduled retry
-- **THEN** the retry resolves the reference and applies the REFUND exactly once
+#### Scenario: Referência chega depois
+- **WHEN** um REFUND chega antes de sua BET e a BET é confirmada antes de uma nova tentativa agendada
+- **THEN** a nova tentativa resolve a referência e aplica o REFUND exatamente uma vez
 
-#### Scenario: Reference never arrives
-- **WHEN** the configured attempt limit is exhausted
-- **THEN** the transaction becomes REJECTED/REFERENCE_NOT_FOUND and `WagerTransactionRejected` is enqueued
+#### Scenario: Referência nunca chega
+- **WHEN** o limite configurado de tentativas é esgotado
+- **THEN** a transação fica REJECTED/REFERENCE_NOT_FOUND e `WagerTransactionRejected` é enfileirado
 
-#### Scenario: Concurrent pending-reference workers
-- **WHEN** multiple processes poll the same due pending references
-- **THEN** `SKIP LOCKED` assigns each available row to at most one active worker and database guarantees prevent duplicate reversal effects
+#### Scenario: Processadores concorrentes de referências pendentes
+- **WHEN** múltiplos processos consultam as mesmas referências pendentes vencidas
+- **THEN** `SKIP LOCKED` atribui cada linha disponível a no máximo um processador ativo e as garantias do banco impedem efeitos duplicados de reversão
 
-### Requirement: Publish transactional Outbox events
-Financial processing MUST persist required events in the same PostgreSQL transaction, and publishers MUST select one due event with `FOR UPDATE SKIP LOCKED`, publish it to `wager-events.fifo`, and mark it published only after broker success.
+### Requirement: Publicar eventos da Outbox transacional
+O processamento financeiro DEVE (`MUST`) persistir os eventos obrigatórios na mesma transação PostgreSQL, e os publicadores DEVEM selecionar um evento vencido com `FOR UPDATE SKIP LOCKED`, publicá-lo em `wager-events.fifo` e marcá-lo como publicado somente depois do sucesso no agente de mensagens.
 
-#### Scenario: Required event set
-- **WHEN** transactions are processed, rejected, pending reference or balance-changing
-- **THEN** the Outbox contains the corresponding minimum events from README §11 and `WalletBalanceChanged` exists only when balance changes
+#### Scenario: Conjunto obrigatório de eventos
+- **WHEN** transações são processadas, rejeitadas, ficam com referência pendente ou alteram saldo
+- **THEN** a Outbox contém os eventos mínimos correspondentes do README §11 e `WalletBalanceChanged` existe somente quando o saldo muda
 
-#### Scenario: Concurrent publishers
-- **WHEN** two publisher processes poll the same pending Outbox rows
-- **THEN** `SKIP LOCKED` assigns different available rows and every event is eventually marked published
+#### Scenario: Publicadores concorrentes
+- **WHEN** dois processos publicadores consultam as mesmas linhas pendentes da Outbox
+- **THEN** `SKIP LOCKED` atribui linhas disponíveis diferentes e cada evento acaba marcado como publicado
 
-#### Scenario: Crash after financial commit
-- **WHEN** the originating process dies after financial commit and before publication
-- **THEN** another publisher discovers and publishes the durable Outbox row
+#### Scenario: Encerramento abrupto depois da confirmação financeira
+- **WHEN** o processo de origem encerra depois da confirmação financeira e antes da publicação
+- **THEN** outro publicador encontra e publica a linha durável da Outbox
 
-#### Scenario: Crash after broker send
-- **WHEN** a publisher dies after SQS accepts an event but before PostgreSQL records publication
-- **THEN** a later attempt can deliver the same event identifier again without changing the original financial state
+#### Scenario: Encerramento abrupto depois do envio ao agente de mensagens
+- **WHEN** um publicador encerra depois que o SQS aceita um evento, mas antes de o PostgreSQL registrar sua publicação
+- **THEN** uma tentativa posterior pode entregar novamente o mesmo identificador de evento sem alterar o estado financeiro original
 
-#### Scenario: Broker failure schedules retry
-- **WHEN** SQS rejects or times out an Outbox publication
-- **THEN** attempts increment, the next attempt uses bounded backoff, the row remains unpublished and its financial transaction remains committed
+#### Scenario: Falha no agente de mensagens agenda nova tentativa
+- **WHEN** o SQS rejeita ou excede o tempo limite de uma publicação da Outbox
+- **THEN** o número de tentativas aumenta, a próxima tentativa usa espera limitada, a linha permanece não publicada e sua transação financeira continua confirmada
 
-### Requirement: Shut messaging down safely
-On SIGTERM the application MUST stop new polling, await in-flight handlers within a bounded shutdown window, leave unfinished messages unacknowledged or reset their visibility, and close SQS and database clients.
+### Requirement: Encerrar a mensageria com segurança
+Ao receber SIGTERM, a aplicação DEVE (`MUST`) interromper novas sondagens, aguardar os processamentos em andamento dentro de um prazo limitado, deixar mensagens inacabadas sem confirmação ou redefinir sua visibilidade e fechar os clientes SQS e do banco.
 
-#### Scenario: Shutdown with in-flight message
-- **WHEN** SIGTERM arrives during message processing
-- **THEN** the process either commits then acknowledges or exits without acknowledgement so another instance can redeliver safely
+#### Scenario: Encerramento com mensagem em processamento
+- **WHEN** SIGTERM chega durante o processamento de uma mensagem
+- **THEN** o processo confirma no banco e depois no SQS, ou encerra sem confirmação para que outra instância possa fazer uma reentrega segura

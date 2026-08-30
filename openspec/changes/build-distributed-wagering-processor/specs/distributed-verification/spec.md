@@ -1,82 +1,82 @@
 ## ADDED Requirements
 
-### Requirement: Verify pure financial behavior
-The unit suite MUST cover Money validation and operations, Wallet invariants, every wager kind and transition, reference rules, currency conflict, Ledger arithmetic and divergent idempotency payloads.
+### Requirement: Verificar o comportamento financeiro puro
+A suíte unitária DEVE (`MUST`) cobrir validação e operações de Money, invariantes da Wallet, cada tipo e transição de aposta, regras de referência, conflito de moeda, aritmética do Ledger e conteúdos divergentes para a mesma idempotência.
 
-#### Scenario: Unit suite execution
-- **WHEN** `bun test` runs without infrastructure-specific filters
-- **THEN** every pure domain requirement is exercised without mocking the domain implementation
+#### Scenario: Execução da suíte unitária
+- **WHEN** `bun test` executa sem filtros específicos de infraestrutura
+- **THEN** cada requisito puro de domínio é exercitado sem simular a implementação do domínio
 
-### Requirement: Verify PostgreSQL and SQS integration
-Integration tests MUST use the real Compose PostgreSQL and LocalStack services, MUST reset shared state deterministically, and MUST cover migrations, constraints, atomicity, Inbox/redelivery, Outbox publishers, retry/DLQ and restart recovery.
+### Requirement: Verificar integração com PostgreSQL e SQS
+Os testes de integração DEVEM (`MUST`) usar os serviços reais de PostgreSQL e LocalStack do Compose, DEVEM reiniciar o estado compartilhado deterministicamente e DEVEM cobrir migrations, restrições, atomicidade, Inbox e reentrega, publicadores da Outbox, novas tentativas, DLQ e recuperação após reinicialização.
 
-#### Scenario: Migration lifecycle
-- **WHEN** migrations run up, down and up against a clean database
-- **THEN** the expected schema and named constraints are recreated without manual intervention
+#### Scenario: Ciclo de vida da migration
+- **WHEN** as migrations executam subida, descida e nova subida em um banco limpo
+- **THEN** o esquema esperado e as restrições nomeadas são recriados sem intervenção manual
 
-#### Scenario: Atomic rollback
-- **WHEN** a forced failure occurs before the financial transaction commits
-- **THEN** Wallet, wager, Ledger, Inbox and Outbox all retain their prior state
+#### Scenario: Reversão atômica
+- **WHEN** uma falha forçada ocorre antes da confirmação da transação financeira
+- **THEN** Wallet, aposta, Ledger, Inbox e Outbox mantêm seus estados anteriores
 
-### Requirement: Prove idempotency under parallel delivery
-The distributed suite MUST send one BET fifty times concurrently across at least three OS processes and MUST prove a single financial effect.
+### Requirement: Provar idempotência sob entrega paralela
+A suíte distribuída DEVE (`MUST`) enviar uma BET cinquenta vezes concorrentemente por pelo menos três processos do sistema operacional e DEVE provar um único efeito financeiro.
 
-#### Scenario: Fifty identical submissions
-- **WHEN** fifty requests with one idempotency key are released together across ports 3101–3103
-- **THEN** one original and forty-nine replays return, final balance reflects one debit, one Ledger entry exists and one financial event set exists
+#### Scenario: Cinquenta submissões idênticas
+- **WHEN** cinquenta requisições com uma chave de idempotência são liberadas juntas nas portas 3101–3103
+- **THEN** um resultado original e quarenta e nove reproduções são retornados, o saldo final reflete um único débito, existe uma entrada no Ledger e existe um único conjunto de eventos financeiros
 
-### Requirement: Prove competing balance correctness
-The distributed suite MUST run the mandatory `100.00 BRL` Wallet and two concurrent `80.00 BRL` BET scenario against shared PostgreSQL.
+### Requirement: Provar correção na disputa por saldo
+A suíte distribuída DEVE (`MUST`) executar, contra o PostgreSQL compartilhado, o cenário obrigatório de uma Wallet com `100.00 BRL` e duas BETs concorrentes de `80.00 BRL`.
 
-#### Scenario: Two bets compete
-- **WHEN** different processes submit both BETs concurrently
-- **THEN** one is PROCESSED, one is REJECTED, balance is `20.00`, exactly one DEBIT exists and Ledger reconstruction equals balance
+#### Scenario: Duas apostas disputam
+- **WHEN** processos diferentes submetem as duas BETs concorrentemente
+- **THEN** uma fica PROCESSED, uma fica REJECTED, o saldo é `20.00`, existe exatamente uma entrada DEBIT e a reconstrução do Ledger é igual ao saldo
 
-### Requirement: Prove independent Wallet progress
-The distributed suite MUST demonstrate that operations on distinct Wallets progress without a global lock.
+### Requirement: Provar o progresso independente de Wallets
+A suíte distribuída DEVE (`MUST`) demonstrar que operações em Wallets distintas avançam sem um bloqueio global.
 
-#### Scenario: Different Wallets in parallel
-- **WHEN** three processes operate on distinct Wallets through a synchronized start
-- **THEN** all outcomes are correct and observed lock contention is scoped to individual Wallet identifiers
+#### Scenario: Wallets diferentes em paralelo
+- **WHEN** três processos operam em Wallets distintas a partir de uma liberação sincronizada
+- **THEN** todos os resultados estão corretos e a contenção de bloqueio observada fica limitada aos identificadores individuais das Wallets
 
-### Requirement: Prove three independent application instances
-The distributed suite MUST start at least three Bun OS processes with distinct PIDs, ports, Nest containers and connection pools sharing only PostgreSQL and SQS.
+### Requirement: Provar três instâncias independentes da aplicação
+A suíte distribuída DEVE (`MUST`) iniciar pelo menos três processos Bun do sistema operacional, com PIDs, portas, contêineres Nest e conjuntos de conexões distintos, compartilhando somente PostgreSQL e SQS.
 
-#### Scenario: All instances participate
-- **WHEN** the suite waits for readiness and distributes requests round-robin
-- **THEN** every PID handles work, remains independently health-checkable and correctness does not depend on process memory
+#### Scenario: Todas as instâncias participam
+- **WHEN** a suíte aguarda a prontidão e distribui requisições alternadamente
+- **THEN** cada PID processa trabalho, pode ter sua saúde consultada independentemente e a correção não depende da memória dos processos
 
-### Requirement: Prove recovery after commit before acknowledgement
-The suite MUST deterministically terminate a consumer process after PostgreSQL commit and before SQS acknowledgement.
+### Requirement: Provar recuperação depois da confirmação e antes da confirmação no SQS
+A suíte DEVE (`MUST`) encerrar deterministicamente um processo consumidor depois da confirmação no PostgreSQL e antes da confirmação no SQS.
 
-#### Scenario: Consumer crashes before ack
-- **WHEN** fault injection kills that process in the post-commit/pre-ack seam
-- **THEN** another process receives the message and Inbox/idempotency prevent another financial effect
+#### Scenario: Consumidor encerra antes da confirmação no SQS
+- **WHEN** a injeção de falha encerra esse processo no intervalo posterior à confirmação no banco e anterior à confirmação no SQS
+- **THEN** outro processo recebe a mensagem e Inbox e idempotência impedem outro efeito financeiro
 
-### Requirement: Prove concurrent Outbox publication
-The suite MUST run at least two publishers over the same Outbox and verify eventual publication without lost rows.
+### Requirement: Provar publicação concorrente da Outbox
+A suíte DEVE (`MUST`) executar pelo menos dois publicadores sobre a mesma Outbox e verificar a publicação eventual sem perda de linhas.
 
-#### Scenario: Two publishers
-- **WHEN** both publishers start on a backlog simultaneously
-- **THEN** every durable event is published, each row reaches published state and duplicate delivery remains identifiable by event ID
+#### Scenario: Dois publicadores
+- **WHEN** os dois publicadores iniciam simultaneamente sobre um acúmulo de eventos
+- **THEN** cada evento durável é publicado, cada linha chega ao estado publicado e uma entrega duplicada continua identificável pelo identificador do evento
 
-### Requirement: Prove out-of-order reversal recovery
-The suite MUST deliver REFUND or ROLLBACK before its reference and verify both eventual success and exhausted-reference rejection.
+### Requirement: Provar recuperação de reversão fora de ordem
+A suíte DEVE (`MUST`) entregar REFUND ou ROLLBACK antes de sua referência e verificar tanto o sucesso posterior quanto a rejeição por esgotamento da referência.
 
-#### Scenario: Reversal precedes reference
-- **WHEN** the reversal is PENDING_REFERENCE and its valid reference arrives later
-- **THEN** scheduled processing completes it exactly once with a reconciled Wallet
+#### Scenario: Reversão antecede a referência
+- **WHEN** a reversão está PENDING_REFERENCE e sua referência válida chega depois
+- **THEN** o processamento agendado a conclui exatamente uma vez com uma Wallet reconciliada
 
-### Requirement: Prove restart consistency
-The suite MUST stop and restart application processes while committed state, unacknowledged messages or unpublished Outbox rows exist.
+### Requirement: Provar consistência após reinicialização
+A suíte DEVE (`MUST`) parar e reiniciar processos da aplicação enquanto existirem estado confirmado, mensagens sem confirmação ou linhas não publicadas na Outbox.
 
-#### Scenario: Full service restart
-- **WHEN** all application processes restart against unchanged PostgreSQL and SQS
-- **THEN** processing resumes and every Wallet balance equals its Ledger reconstruction after quiescence
+#### Scenario: Reinicialização completa do serviço
+- **WHEN** todos os processos da aplicação reiniciam usando os mesmos PostgreSQL e SQS
+- **THEN** o processamento continua e o saldo de cada Wallet é igual à sua reconstrução pelo Ledger depois que o sistema fica sem trabalho pendente
 
-### Requirement: Assert the final financial invariant
-Every integration or concurrency test that can change a Wallet MUST finish by comparing stored balance with the exact balance reconstructed from its immutable Ledger.
+### Requirement: Afirmar a invariante financeira final
+Cada teste de integração ou concorrência que possa alterar uma Wallet DEVE (`MUST`) terminar comparando o saldo armazenado com o saldo exato reconstruído de seu Ledger imutável.
 
-#### Scenario: Financial test teardown
-- **WHEN** a financial scenario reaches its terminal observable state
-- **THEN** `wallet.balance == reconstructed ledger balance` is asserted before the scenario passes
+#### Scenario: Finalização do teste financeiro
+- **WHEN** um cenário financeiro chega ao estado observável terminal
+- **THEN** `saldo da Wallet == saldo reconstruído pelo Ledger` é afirmado antes de o cenário passar

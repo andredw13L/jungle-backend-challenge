@@ -1,58 +1,58 @@
 ## ADDED Requirements
 
-### Requirement: Validate runtime configuration
-The Bun process MUST validate required PostgreSQL, SQS, region, queue, port and retry configuration before NestJS begins listening, and MUST reject invalid numeric ranges or missing values with a clear startup error.
+### Requirement: Validar configuração do ambiente de execução
+O processo Bun DEVE (`MUST`) validar as configurações obrigatórias de PostgreSQL, SQS, região, filas, porta e novas tentativas antes de o NestJS começar a escutar, e DEVE rejeitar intervalos numéricos inválidos ou valores ausentes com um erro claro de inicialização.
 
-#### Scenario: Missing database URL
-- **WHEN** the application starts without a database URL
-- **THEN** startup fails before accepting traffic and identifies the missing variable without printing secrets
+#### Scenario: URL do banco ausente
+- **WHEN** a aplicação inicia sem a URL do banco
+- **THEN** a inicialização falha antes de aceitar tráfego e identifica a variável ausente sem imprimir segredos
 
-### Requirement: Separate liveness and readiness
-`GET /health/live` MUST report only process liveness, while `GET /health/ready` MUST check PostgreSQL and required SQS queues and return `503` when a dependency is unavailable; neither route requires authentication.
+### Requirement: Separar disponibilidade do processo e prontidão
+`GET /health/live` DEVE (`MUST`) informar somente se o processo está vivo, enquanto `GET /health/ready` DEVE verificar o PostgreSQL e as filas SQS obrigatórias e retornar `503` quando uma dependência estiver indisponível; nenhuma das rotas exige autenticação.
 
-#### Scenario: PostgreSQL unavailable
-- **WHEN** PostgreSQL stops while the process remains alive
-- **THEN** liveness stays successful and readiness becomes `503`
+#### Scenario: PostgreSQL indisponível
+- **WHEN** o PostgreSQL para enquanto o processo continua vivo
+- **THEN** a disponibilidade do processo continua bem-sucedida e a prontidão passa a retornar `503`
 
-#### Scenario: Required queues available
-- **WHEN** PostgreSQL, the command queue and event queue are reachable
-- **THEN** readiness returns success with dependency details that contain no credentials
+#### Scenario: Filas obrigatórias disponíveis
+- **WHEN** o PostgreSQL, a fila de comandos e a fila de eventos estão acessíveis
+- **THEN** a prontidão retorna sucesso com detalhes das dependências que não contêm credenciais
 
-### Requirement: Emit structured safe logs
-The service MUST emit JSON logs containing available correlation, message, transaction, Wallet and provider identifiers, and MUST NOT log access tokens, credentials or complete financial payloads.
+### Requirement: Emitir logs estruturados e seguros
+O serviço DEVE (`MUST`) emitir logs JSON contendo os identificadores disponíveis de correlação, mensagem, transação, Wallet e provedor, e NÃO DEVE registrar tokens de acesso, credenciais nem conteúdos financeiros completos.
 
-#### Scenario: Wager request log
-- **WHEN** a wagering request completes
-- **THEN** its structured log contains correlation and entity identifiers plus outcome, but omits the request body and exact Money object
+#### Scenario: Log de requisição de aposta
+- **WHEN** uma requisição de aposta termina
+- **THEN** seu log estruturado contém identificadores de correlação e das entidades, além do resultado, mas omite o corpo da requisição e o objeto Money exato
 
-### Requirement: Expose required metrics
-`GET /metrics` MUST expose transaction outcomes, duplicates, retries, DLQ messages, lock conflicts, Outbox lag and processing latency in Prometheus format.
+### Requirement: Expor métricas obrigatórias
+`GET /metrics` DEVE (`MUST`) expor, no formato Prometheus, resultados das transações, duplicatas, novas tentativas, mensagens na DLQ, conflitos de bloqueio, atraso da Outbox e latência de processamento.
 
-#### Scenario: Duplicate request metric
-- **WHEN** an identical wager is replayed
-- **THEN** the duplicate counter increments without incrementing the financial-effect count
+#### Scenario: Métrica de requisição duplicada
+- **WHEN** uma aposta idêntica é reproduzida
+- **THEN** o contador de duplicatas aumenta sem incrementar a quantidade de efeitos financeiros
 
-#### Scenario: Outbox lag metric
-- **WHEN** an unpublished Outbox event ages
-- **THEN** the lag gauge reflects elapsed seconds without exposing its payload
+#### Scenario: Métrica de atraso da Outbox
+- **WHEN** um evento não publicado da Outbox envelhece
+- **THEN** o medidor de atraso reflete os segundos decorridos sem expor seu conteúdo
 
-### Requirement: Support graceful application shutdown
-The application MUST enable NestJS shutdown hooks and coordinate HTTP, worker, SQS, MikroORM and metrics resources without accepting new work after shutdown begins.
+### Requirement: Encerrar a aplicação de forma controlada
+A aplicação DEVE (`MUST`) habilitar os gatilhos de encerramento do NestJS e coordenar recursos HTTP, processadores, SQS, MikroORM e métricas sem aceitar novo trabalho depois do início do encerramento.
 
 #### Scenario: SIGTERM
-- **WHEN** the process receives SIGTERM
-- **THEN** polling stops, in-flight work is settled safely and all clients close before process termination or timeout
+- **WHEN** o processo recebe SIGTERM
+- **THEN** as sondagens param, o trabalho em andamento é concluído com segurança e todos os clientes são fechados antes do término do processo ou do tempo limite
 
-### Requirement: Keep authentication external
-Financial routes MUST expose a no-op guard and `ProviderIdentityPort` seam for a future external OIDC provider, MUST NOT implement local credentials or token issuance, and MUST leave health endpoints open.
+### Requirement: Manter a autenticação externa
+As rotas financeiras DEVEM (`MUST`) expor um guard sem efeito e um ponto de extensão `ProviderIdentityPort` para um futuro provedor OIDC externo, NÃO DEVEM implementar credenciais locais nem emissão de tokens e DEVEM deixar os endpoints de health abertos.
 
-#### Scenario: Challenge deployment without IdP
-- **WHEN** the service starts in the documented challenge environment
-- **THEN** financial routes remain usable through the explicit no-op adapter and no user credential table exists
+#### Scenario: Ambiente do desafio sem provedor de identidade
+- **WHEN** o serviço inicia no ambiente documentado do desafio
+- **THEN** as rotas financeiras permanecem utilizáveis pelo adaptador explícito sem efeito e não existe tabela de credenciais de usuários
 
-### Requirement: Run through Bun and Docker Compose
-Installation, execution, type checking, migration and tests MUST use documented Bun commands, and Docker Compose MUST provide PostgreSQL, pinned LocalStack 3.8.1, FIFO command/DLQ/event queue initialization with content-based deduplication, and the application with health-aware dependencies.
+### Requirement: Executar com Bun e Docker Compose
+Instalação, execução, verificação de tipos, migrations e testes DEVEM (`MUST`) usar comandos Bun documentados, e o Docker Compose DEVE fornecer PostgreSQL, LocalStack 3.8.1 fixado, inicialização das filas FIFO de comandos, DLQ e eventos com deduplicação baseada em conteúdo e a aplicação com dependências condicionadas à saúde.
 
-#### Scenario: Clean local startup
-- **WHEN** a reviewer follows the documented commands from a clean clone
-- **THEN** dependencies install, migrations apply, queues exist and the application becomes ready without manual database or broker setup
+#### Scenario: Inicialização local limpa
+- **WHEN** um avaliador segue os comandos documentados a partir de um clone limpo
+- **THEN** as dependências são instaladas, as migrations são aplicadas, as filas existem e a aplicação fica pronta sem configuração manual do banco ou do agente de mensagens

@@ -1,106 +1,106 @@
 ## ADDED Requirements
 
-### Requirement: Validate wagering contracts
-`POST /wagering/transactions` MUST require `Idempotency-Key`, MUST reject unknown fields and malformed identifiers, kinds or Money with `422`, and MUST reject external OPENING operations.
+### Requirement: Validar contratos de apostas
+`POST /wagering/transactions` DEVE (`MUST`) exigir `Idempotency-Key`, DEVE rejeitar campos desconhecidos e identificadores, tipos ou Money malformados com `422` e DEVE rejeitar operações OPENING externas.
 
-#### Scenario: Valid command
-- **WHEN** a complete BET command and idempotency header pass validation
-- **THEN** the controller calls `ProcessWager` with normalized business fields and no transport metadata in the payload hash
+#### Scenario: Comando válido
+- **WHEN** um comando BET completo e o cabeçalho de idempotência passam pela validação
+- **THEN** o controlador chama `ProcessWager` com os campos de negócio normalizados e sem metadados de transporte no hash do conteúdo
 
-#### Scenario: Unknown contract field
-- **WHEN** a request contains an undeclared property
-- **THEN** whitelist validation rejects it with `422/INVALID_PAYLOAD`
+#### Scenario: Campo desconhecido no contrato
+- **WHEN** uma requisição contém uma propriedade não declarada
+- **THEN** a validação por lista permitida a rejeita com `422/INVALID_PAYLOAD`
 
-### Requirement: Persist idempotency and replay
-The system MUST arbitrate idempotency through named PostgreSQL unique constraints, MUST hash RFC 8785 canonical business JSON with SHA-256, and MUST replay the persisted response without repeating effects.
+### Requirement: Persistir idempotência e reprodução
+O sistema DEVE (`MUST`) arbitrar a idempotência por restrições nomeadas de unicidade no PostgreSQL, DEVE gerar o hash do JSON canônico de negócio conforme RFC 8785 com SHA-256 e DEVE reproduzir a resposta persistida sem repetir efeitos.
 
-#### Scenario: Identical replay
-- **WHEN** the same idempotency key and logical payload are submitted again in a different JSON property order
-- **THEN** the canonical hashes match, the original transaction identifier/status/balance are returned with `idempotentReplay: true`, and no Wallet, Ledger or Outbox effect is duplicated
+#### Scenario: Reprodução idêntica
+- **WHEN** a mesma chave de idempotência e o mesmo conteúdo lógico são submetidos novamente com outra ordem de propriedades JSON
+- **THEN** os hashes canônicos coincidem, o identificador, o estado e o saldo da transação original são retornados com `idempotentReplay: true`, e nenhum efeito na Wallet, no Ledger ou na Outbox é duplicado
 
-#### Scenario: Conflicting replay
-- **WHEN** an existing idempotency key is reused with different business fields
-- **THEN** the response is `422/IDEMPOTENCY_CONFLICT` and the original result remains unchanged
+#### Scenario: Reprodução conflitante
+- **WHEN** uma chave de idempotência existente é reutilizada com campos de negócio diferentes
+- **THEN** a resposta é `422/IDEMPOTENCY_CONFLICT` e o resultado original permanece inalterado
 
-#### Scenario: Provider transaction reused under another key
-- **WHEN** the same provider and external transaction identifier are submitted with another idempotency key
-- **THEN** the request is rejected as a stable external-transaction conflict without a duplicate effect
+#### Scenario: Transação do provedor reutilizada com outra chave
+- **WHEN** o mesmo provedor e identificador externo de transação são submetidos com outra chave de idempotência
+- **THEN** a requisição é rejeitada com um conflito estável de transação externa e sem efeito duplicado
 
-### Requirement: Serialize balance-changing operations by Wallet
-BET, WIN, REFUND and ROLLBACK MUST lock one Wallet row within `READ COMMITTED` before evaluating or changing balance; different Wallets MUST remain independent and no process-local lock may provide correctness.
+### Requirement: Serializar por Wallet as operações que alteram saldo
+BET, WIN, REFUND e ROLLBACK DEVEM (`MUST`) bloquear uma linha de Wallet dentro de `READ COMMITTED` antes de avaliar ou alterar o saldo; Wallets diferentes DEVEM permanecer independentes e nenhum bloqueio local ao processo pode garantir a correção.
 
-#### Scenario: Competing bets
-- **WHEN** two `80.00 BRL` BETs concurrently target a Wallet containing `100.00 BRL`
-- **THEN** exactly one is PROCESSED, one is REJECTED/INSUFFICIENT_FUNDS, final balance is `20.00`, version changes once and exactly one DEBIT entry exists
+#### Scenario: Apostas concorrentes
+- **WHEN** duas BETs de `80.00 BRL` disputam concorrentemente uma Wallet com `100.00 BRL`
+- **THEN** exatamente uma fica PROCESSED, uma fica REJECTED/INSUFFICIENT_FUNDS, o saldo final é `20.00`, a versão muda uma vez e existe exatamente uma entrada DEBIT
 
-#### Scenario: Different Wallets
-- **WHEN** operations target different Wallet identifiers concurrently
-- **THEN** neither waits on a global application lock and both outcomes remain correct
+#### Scenario: Wallets diferentes
+- **WHEN** operações atingem concorrentemente identificadores diferentes de Wallet
+- **THEN** nenhuma aguarda um bloqueio global da aplicação e os dois resultados permanecem corretos
 
-### Requirement: Apply BET, WIN and LOSS rules
-BET MUST debit sufficient balance, WIN MUST credit balance, and LOSS MUST record a processed outcome without changing balance or producing a Ledger entry.
+### Requirement: Aplicar as regras de BET, WIN e LOSS
+BET DEVE (`MUST`) debitar um saldo suficiente, WIN DEVE creditar o saldo e LOSS DEVE registrar um resultado processado sem alterar o saldo nem produzir uma entrada no Ledger.
 
-#### Scenario: Process BET
-- **WHEN** a valid BET has sufficient balance
-- **THEN** it is PROCESSED with one DEBIT entry and `WagerTransactionProcessed` plus `WalletBalanceChanged` Outbox events
+#### Scenario: Processar BET
+- **WHEN** uma BET válida tem saldo suficiente
+- **THEN** ela fica PROCESSED com uma entrada DEBIT e eventos `WagerTransactionProcessed` e `WalletBalanceChanged` na Outbox
 
-#### Scenario: Process WIN
-- **WHEN** a valid WIN is submitted
-- **THEN** it is PROCESSED with one CREDIT entry and the exact new balance
+#### Scenario: Processar WIN
+- **WHEN** uma WIN válida é submetida
+- **THEN** ela fica PROCESSED com uma entrada CREDIT e o novo saldo exato
 
-#### Scenario: WIN with optional BET reference
-- **WHEN** a WIN identifies a BET reference
-- **THEN** the reference must be a matching PROCESSED BET from the same provider, player, Wallet, currency and round before the WIN is credited
+#### Scenario: WIN com referência opcional a BET
+- **WHEN** uma WIN identifica uma referência BET
+- **THEN** a referência deve ser uma BET PROCESSED correspondente, do mesmo provedor, jogador, Wallet, moeda e rodada, antes de a WIN ser creditada
 
-#### Scenario: Process LOSS
-- **WHEN** a valid LOSS is submitted
-- **THEN** it is PROCESSED, balance/version remain unchanged and only `WagerTransactionProcessed` is enqueued
+#### Scenario: Processar LOSS
+- **WHEN** uma LOSS válida é submetida
+- **THEN** ela fica PROCESSED, o saldo e a versão permanecem inalterados e somente `WagerTransactionProcessed` é enfileirado
 
-### Requirement: Apply full reversals once
-REFUND MUST reverse only a PROCESSED BET; ROLLBACK MUST reverse a PROCESSED BET, WIN or REFUND; the reference MUST match provider, player, Wallet, currency and round; the amount MUST be equal; and each reference/type pair MUST be reversed at most once.
+### Requirement: Aplicar reversões integrais uma única vez
+REFUND DEVE (`MUST`) reverter somente uma BET PROCESSED; ROLLBACK DEVE reverter uma BET, WIN ou REFUND PROCESSED; a referência DEVE corresponder ao provedor, jogador, Wallet, moeda e rodada; o valor DEVE ser igual; e cada par de referência e tipo DEVE ser revertido no máximo uma vez.
 
-#### Scenario: Valid REFUND
-- **WHEN** a REFUND exactly references a matching PROCESSED BET
-- **THEN** it credits the original amount once and links the internal reference transaction
+#### Scenario: REFUND válido
+- **WHEN** um REFUND referencia exatamente uma BET PROCESSED correspondente
+- **THEN** ele credita o valor original uma única vez e vincula a transação interna de referência
 
-#### Scenario: Valid ROLLBACK
-- **WHEN** a ROLLBACK exactly references a matching PROCESSED WIN
-- **THEN** it creates one inverse DEBIT and becomes PROCESSED
+#### Scenario: ROLLBACK válido
+- **WHEN** um ROLLBACK referencia exatamente uma WIN PROCESSED correspondente
+- **THEN** ele cria uma entrada DEBIT inversa e fica PROCESSED
 
-#### Scenario: ROLLBACK direction follows its reference
-- **WHEN** a ROLLBACK references a PROCESSED BET, WIN or REFUND
-- **THEN** BET produces an inverse CREDIT while WIN and REFUND produce an inverse DEBIT of the full referenced amount
+#### Scenario: Direção do ROLLBACK acompanha sua referência
+- **WHEN** um ROLLBACK referencia uma BET, WIN ou REFUND PROCESSED
+- **THEN** BET produz um CREDIT inverso, enquanto WIN e REFUND produzem um DEBIT inverso do valor integral referenciado
 
-#### Scenario: Invalid reference scope or amount
-- **WHEN** reference identity, scope, kind or amount does not satisfy the reversal rules
-- **THEN** the transaction becomes REJECTED with the corresponding stable failure code and no Ledger entry
+#### Scenario: Escopo ou valor da referência inválido
+- **WHEN** a identidade, o escopo, o tipo ou o valor da referência não satisfaz as regras de reversão
+- **THEN** a transação fica REJECTED com o código de falha estável correspondente e sem entrada no Ledger
 
-#### Scenario: Reversal would overdraw
-- **WHEN** reversing a prior credit would make the Wallet negative
-- **THEN** the transaction becomes REJECTED/REVERSAL_WOULD_OVERDRAW and remains auditably persisted
+#### Scenario: Reversão produziria saldo negativo
+- **WHEN** reverter um crédito anterior tornaria o saldo da Wallet negativo
+- **THEN** a transação fica REJECTED/REVERSAL_WOULD_OVERDRAW e permanece persistida para auditoria
 
-#### Scenario: Concurrent duplicate reversal
-- **WHEN** two reversals of the same type race for the same reference
-- **THEN** a partial unique index permits at most one effect and the other returns REFERENCE_ALREADY_REVERSED
+#### Scenario: Reversão duplicada concorrente
+- **WHEN** duas reversões do mesmo tipo disputam a mesma referência
+- **THEN** um índice único parcial permite no máximo um efeito e a outra retorna `REFERENCE_ALREADY_REVERSED`
 
-### Requirement: Query wagering transactions
-The system MUST expose transaction lookup by internal identifier and by `(providerId, externalTransactionId)`, returning the persisted status, failure, reference and exact Money or `404` when absent.
+### Requirement: Consultar transações de apostas
+O sistema DEVE (`MUST`) expor a consulta de transações pelo identificador interno e por `(providerId, externalTransactionId)`, retornando estado, falha, referência e Money exato persistidos, ou `404` quando ausentes.
 
-#### Scenario: Query processed transaction
-- **WHEN** a known transaction is queried through either route
-- **THEN** both routes identify the same immutable operation and current persisted outcome
+#### Scenario: Consultar transação processada
+- **WHEN** uma transação conhecida é consultada por qualquer uma das rotas
+- **THEN** ambas identificam a mesma operação imutável e o resultado persistido atual
 
-### Requirement: Distinguish outcomes from infrastructure errors
-Business rejections MUST return `200` with a stable failure code, pending references MUST return `202`, and transient infrastructure failures MUST return `503` so a provider can safely retry the same idempotency key.
+### Requirement: Distinguir resultados de erros de infraestrutura
+Rejeições de negócio DEVEM (`MUST`) retornar `200` com código de falha estável, referências pendentes DEVEM retornar `202` e falhas transitórias de infraestrutura DEVEM retornar `503`, permitindo que o provedor repita com segurança a mesma chave de idempotência.
 
-#### Scenario: Insufficient funds is an outcome
-- **WHEN** a syntactically valid BET lacks sufficient balance
-- **THEN** the response is `200` with status REJECTED and failure code INSUFFICIENT_FUNDS rather than a validation error
+#### Scenario: Saldo insuficiente é um resultado
+- **WHEN** uma BET sintaticamente válida não tem saldo suficiente
+- **THEN** a resposta é `200` com estado REJECTED e código de falha INSUFFICIENT_FUNDS, e não um erro de validação
 
-#### Scenario: PostgreSQL temporarily unavailable
-- **WHEN** processing cannot reach PostgreSQL
-- **THEN** the response is `503` and no successful financial outcome is fabricated
+#### Scenario: PostgreSQL temporariamente indisponível
+- **WHEN** o processamento não consegue acessar o PostgreSQL
+- **THEN** a resposta é `503` e nenhum resultado financeiro bem-sucedido é inventado
 
-#### Scenario: PostgreSQL error classes remain distinct
-- **WHEN** PostgreSQL reports a named `23505`, invariant `23514`, or transient `40001`
-- **THEN** the system respectively handles the named conflict, raises an invariant alert without hiding the bug, or returns a retryable infrastructure outcome
+#### Scenario: Classes de erro do PostgreSQL permanecem distintas
+- **WHEN** o PostgreSQL informa uma violação nomeada `23505`, uma violação de invariante `23514` ou uma falha transitória `40001`
+- **THEN** o sistema, respectivamente, trata o conflito nomeado, emite um alerta de invariante sem ocultar o erro ou retorna um resultado de infraestrutura que permite nova tentativa

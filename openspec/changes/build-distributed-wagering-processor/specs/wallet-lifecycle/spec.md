@@ -1,49 +1,49 @@
 ## ADDED Requirements
 
-### Requirement: Create Wallet atomically
-`POST /wallets` MUST create at most one Wallet per player and currency and MUST atomically persist any positive opening balance, its internal OPENING transaction, one CREDIT Ledger entry and related Outbox events.
+### Requirement: Criar Wallet atomicamente
+`POST /wallets` DEVE (`MUST`) criar no máximo uma Wallet por jogador e moeda e DEVE persistir atomicamente qualquer saldo inicial positivo, sua transação interna OPENING, uma entrada CREDIT no Ledger e os eventos relacionados na Outbox.
 
-#### Scenario: Positive opening balance
-- **WHEN** a valid player creates a Wallet with `1000.00 BRL`
-- **THEN** the response is `201`, version is 1, balance is `1000.00`, and the database contains one OPENING transaction and one matching CREDIT entry in the same commit
+#### Scenario: Saldo inicial positivo
+- **WHEN** um jogador válido cria uma Wallet com `1000.00 BRL`
+- **THEN** a resposta é `201`, a versão é 1, o saldo é `1000.00` e o banco contém uma transação OPENING e uma entrada CREDIT correspondente na mesma confirmação
 
-#### Scenario: Zero opening balance
-- **WHEN** a Wallet is created with `0.00 BRL`
-- **THEN** version is 1 and no OPENING transaction or Ledger entry is created
+#### Scenario: Saldo inicial zero
+- **WHEN** uma Wallet é criada com `0.00 BRL`
+- **THEN** a versão é 1 e nenhuma transação OPENING nem entrada no Ledger é criada
 
-#### Scenario: Duplicate Wallet
-- **WHEN** the same player and currency are created concurrently more than once
-- **THEN** exactly one Wallet exists and every loser receives a `409` conflict
+#### Scenario: Wallet duplicada
+- **WHEN** a mesma combinação de jogador e moeda é criada concorrentemente mais de uma vez
+- **THEN** existe exatamente uma Wallet e todas as requisições perdedoras recebem conflito `409`
 
-### Requirement: Query Wallet
-`GET /wallets/:walletId` MUST return the Wallet identifier, player, exact balance and version, and MUST return `404` for an unknown identifier.
+### Requirement: Consultar Wallet
+`GET /wallets/:walletId` DEVE (`MUST`) retornar o identificador da Wallet, o jogador, o saldo exato e a versão, e DEVE retornar `404` para um identificador desconhecido.
 
-#### Scenario: Existing Wallet
-- **WHEN** a known Wallet is queried
-- **THEN** its current persisted balance and version are returned as decimal strings
+#### Scenario: Wallet existente
+- **WHEN** uma Wallet conhecida é consultada
+- **THEN** seu saldo persistido atual e sua versão são retornados como strings decimais
 
-#### Scenario: Missing Wallet
-- **WHEN** an unknown Wallet identifier is queried
-- **THEN** the response is `404` with a stable machine-readable code
+#### Scenario: Wallet ausente
+- **WHEN** um identificador desconhecido de Wallet é consultado
+- **THEN** a resposta é `404` com um código estável e legível por máquina
 
-### Requirement: Page immutable Ledger
-`GET /wallets/:walletId/ledger` MUST return reverse-chronological entries using an opaque stable cursor, a default limit of 50 and a maximum limit of 100.
+### Requirement: Paginar o Ledger imutável
+`GET /wallets/:walletId/ledger` DEVE (`MUST`) retornar entradas em ordem cronológica inversa usando um cursor opaco e estável, limite padrão de 50 e limite máximo de 100.
 
-#### Scenario: Next page remains stable
-- **WHEN** a client requests the next page using the Base64URL `{createdAt,id}` cursor while newer entries are inserted
-- **THEN** the query uses keyset ordering and neither skips nor repeats older entries
+#### Scenario: Próxima página permanece estável
+- **WHEN** um cliente solicita a próxima página usando o cursor Base64URL `{createdAt,id}` enquanto entradas mais novas são inseridas
+- **THEN** a consulta usa ordenação por chave e não pula nem repete entradas mais antigas
 
-#### Scenario: Invalid pagination
-- **WHEN** the cursor is malformed or the limit is outside the accepted range
-- **THEN** the response is `422` and no query is executed with untrusted cursor values
+#### Scenario: Paginação inválida
+- **WHEN** o cursor está malformado ou o limite está fora do intervalo aceito
+- **THEN** a resposta é `422` e nenhuma consulta é executada com valores não confiáveis do cursor
 
-### Requirement: Reconcile Wallet and Ledger
-`POST /wallets/:walletId/reconciliation` MUST calculate the Ledger balance with exact PostgreSQL arithmetic, compare it with the stored balance, report the difference and entry count, and MUST NOT repair a divergence.
+### Requirement: Reconciliar Wallet e Ledger
+`POST /wallets/:walletId/reconciliation` DEVE (`MUST`) calcular o saldo do Ledger com aritmética exata no PostgreSQL, compará-lo com o saldo armazenado, informar a diferença e a quantidade de entradas e NÃO DEVE corrigir uma divergência.
 
-#### Scenario: Consistent Wallet
-- **WHEN** the Ledger reconstructs the stored balance
-- **THEN** the response reports equal exact values, zero difference and `consistent: true`
+#### Scenario: Wallet consistente
+- **WHEN** o Ledger reconstrói o saldo armazenado
+- **THEN** a resposta informa valores exatos iguais, diferença zero e `consistent: true`
 
-#### Scenario: Divergent Wallet
-- **WHEN** a test fixture creates a stored/Ledger mismatch
-- **THEN** the response reports `consistent: false`, emits a structured log and metric, and leaves all financial rows unchanged
+#### Scenario: Wallet divergente
+- **WHEN** um dado preparado para teste cria uma divergência entre o saldo armazenado e o Ledger
+- **THEN** a resposta informa `consistent: false`, emite log estruturado e métrica e deixa todas as linhas financeiras inalteradas

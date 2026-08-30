@@ -1,75 +1,75 @@
 ## ADDED Requirements
 
-### Requirement: Exact immutable Money
-The system MUST represent monetary amounts as decimal strings with fixed scale 2 at contracts and PostgreSQL boundaries, MUST calculate with an exact decimal implementation, and MUST NOT use JavaScript `number` for monetary state or arithmetic.
+### Requirement: Money exato e imutável
+O sistema DEVE (`MUST`) representar valores monetários como strings decimais com escala fixa de 2 casas nos contratos e nas fronteiras com o PostgreSQL, DEVE calcular com uma implementação decimal exata e NÃO DEVE usar `number` do JavaScript para estado ou aritmética monetária.
 
-#### Scenario: Exact decimal arithmetic
-- **WHEN** `0.10 BRL` and `0.20 BRL` are added
-- **THEN** the result is a new Money value serialized as `{"amount":"0.30","currency":"BRL"}` and both operands remain unchanged
+#### Scenario: Aritmética decimal exata
+- **WHEN** `0.10 BRL` e `0.20 BRL` são somados
+- **THEN** o resultado é um novo valor Money serializado como `{"amount":"0.30","currency":"BRL"}` e os dois operandos permanecem inalterados
 
-#### Scenario: Invalid external amount
-- **WHEN** an external contract contains an empty value, negative value, scientific notation, leading zero such as `007`, or more than two decimal places
-- **THEN** validation rejects it before financial state is created
+#### Scenario: Valor externo inválido
+- **WHEN** um contrato externo contém valor vazio, negativo, em notação científica, com zero à esquerda como `007` ou com mais de duas casas decimais
+- **THEN** a validação o rejeita antes da criação do estado financeiro
 
-#### Scenario: Normalize accepted scale without silent rounding
-- **WHEN** an external amount is `25` or `25.0`
-- **THEN** it serializes as `25.00`, while `25.001` is rejected rather than rounded
+#### Scenario: Normalizar escala aceita sem arredondamento silencioso
+- **WHEN** um valor externo é `25` ou `25.0`
+- **THEN** ele é serializado como `25.00`, enquanto `25.001` é rejeitado em vez de arredondado
 
-#### Scenario: Currency conflict
-- **WHEN** arithmetic is attempted between different currencies
-- **THEN** the domain rejects the operation with a stable currency mismatch outcome
+#### Scenario: Conflito de moeda
+- **WHEN** uma operação aritmética é tentada entre moedas diferentes
+- **THEN** o domínio rejeita a operação com um resultado estável de incompatibilidade de moeda
 
-### Requirement: Wallet invariants
-A Wallet MUST belong to one player and currency, MUST begin at version 1, MUST never expose a negative balance, and MUST increment its version only when its balance changes.
+### Requirement: Invariantes da Wallet
+Uma Wallet DEVE (`MUST`) pertencer a um jogador e uma moeda, DEVE começar na versão 1, NUNCA DEVE expor saldo negativo e DEVE incrementar sua versão somente quando o saldo mudar.
 
-#### Scenario: Successful debit
-- **WHEN** a Wallet with `100.00 BRL` is debited by `80.00 BRL`
-- **THEN** it returns the before/after values `100.00` and `20.00` and increments version exactly once
+#### Scenario: Débito bem-sucedido
+- **WHEN** uma Wallet com `100.00 BRL` é debitada em `80.00 BRL`
+- **THEN** ela retorna os valores anterior e posterior de `100.00` e `20.00` e incrementa a versão exatamente uma vez
 
-#### Scenario: Insufficient balance
-- **WHEN** a debit exceeds the available balance
-- **THEN** the Wallet remains unchanged and produces the `INSUFFICIENT_FUNDS` business rejection
+#### Scenario: Saldo insuficiente
+- **WHEN** um débito excede o saldo disponível
+- **THEN** a Wallet permanece inalterada e produz a rejeição de negócio `INSUFFICIENT_FUNDS`
 
-#### Scenario: Rehydration
-- **WHEN** a Wallet is rehydrated from persisted state
-- **THEN** its trusted state is reconstructed without replaying creation or transition validation
+#### Scenario: Reidratação
+- **WHEN** uma Wallet é reidratada a partir do estado persistido
+- **THEN** seu estado confiável é reconstruído sem repetir validações de criação ou transição
 
-### Requirement: Auditable Ledger entry
-Every balance change MUST have exactly one immutable Ledger entry whose direction and amount transform `balanceBefore` into `balanceAfter`; operations without a balance effect MUST NOT create an entry.
+### Requirement: Entrada de Ledger auditável
+Cada alteração de saldo DEVE (`MUST`) ter exatamente uma entrada imutável no Ledger cuja direção e valor transformem `balanceBefore` em `balanceAfter`; operações sem efeito no saldo NÃO DEVEM criar uma entrada.
 
-#### Scenario: Balanced entry
-- **WHEN** a `DEBIT` entry describes `100.00 - 80.00`
-- **THEN** it is valid only with `balanceAfter` equal to `20.00`
+#### Scenario: Entrada balanceada
+- **WHEN** uma entrada `DEBIT` descreve `100.00 - 80.00`
+- **THEN** ela é válida somente com `balanceAfter` igual a `20.00`
 
-#### Scenario: No entry for non-financial outcome
-- **WHEN** a LOSS or REJECTED transaction is recorded
-- **THEN** no Ledger entry is created and the Wallet version is unchanged
+#### Scenario: Nenhuma entrada para resultado sem efeito financeiro
+- **WHEN** uma transação LOSS ou REJECTED é registrada
+- **THEN** nenhuma entrada no Ledger é criada e a versão da Wallet permanece inalterada
 
-### Requirement: Wager transaction state machine
-WagerTransaction MUST support OPENING, BET, WIN, LOSS, REFUND and ROLLBACK, MUST require valid references for reversal kinds, and MUST prevent PROCESSED, REJECTED and FAILED states from transitioning again.
+### Requirement: Máquina de estados de WagerTransaction
+WagerTransaction DEVE (`MUST`) aceitar OPENING, BET, WIN, LOSS, REFUND e ROLLBACK, DEVE exigir referências válidas para tipos de reversão e DEVE impedir novas transições a partir dos estados PROCESSED, REJECTED e FAILED.
 
-#### Scenario: Internal opening
-- **WHEN** a positive initial Wallet balance is created
-- **THEN** an internal OPENING transaction can become PROCESSED but the same kind cannot be submitted through HTTP or SQS
+#### Scenario: Abertura interna
+- **WHEN** uma Wallet é criada com saldo inicial positivo
+- **THEN** uma transação interna OPENING pode se tornar PROCESSED, mas o mesmo tipo não pode ser submetido por HTTP nem SQS
 
-#### Scenario: Terminal transaction
-- **WHEN** code attempts to transition a terminal transaction
-- **THEN** an invalid-state programming error is raised and no new financial effect occurs
+#### Scenario: Transação terminal
+- **WHEN** o código tenta transicionar uma transação terminal
+- **THEN** um erro de programação por estado inválido é lançado e nenhum novo efeito financeiro ocorre
 
-#### Scenario: Required reference
-- **WHEN** REFUND or ROLLBACK is created without a provider reference
-- **THEN** the request is rejected as invalid before persistence
+#### Scenario: Referência obrigatória
+- **WHEN** REFUND ou ROLLBACK é criado sem uma referência do provedor
+- **THEN** a requisição é rejeitada como inválida antes da persistência
 
-### Requirement: Controlled domain construction
-Domain entities MUST use private or protected constructors, MUST expose creation factories that validate new state, and MUST expose rehydration factories that trust already persisted state without replaying transition rules.
+### Requirement: Construção controlada do domínio
+As entidades de domínio DEVEM (`MUST`) usar construtores privados ou protegidos, DEVEM expor factories de criação que validem o novo estado e DEVEM expor factories de reidratação que confiem no estado já persistido sem repetir regras de transição.
 
-#### Scenario: Creation and rehydration have distinct semantics
-- **WHEN** identical raw values enter through a creation factory and a rehydration factory
-- **THEN** creation enforces new-operation invariants while rehydration reconstructs the trusted persisted snapshot
+#### Scenario: Criação e reidratação têm semânticas distintas
+- **WHEN** valores brutos idênticos entram por uma factory de criação e por uma factory de reidratação
+- **THEN** a criação aplica as invariantes de uma nova operação, enquanto a reidratação reconstrói o estado persistido confiável
 
-### Requirement: Typed integration events
-Integration events MUST use an abstract versioned envelope and concrete event types, MUST serialize dates as ISO-8601 and Money as decimal-string properties, and MUST remain immutable after creation.
+### Requirement: Eventos de integração tipados
+Os eventos de integração DEVEM (`MUST`) usar um envelope abstrato e versionado com tipos concretos de evento, DEVEM serializar datas em ISO-8601 e Money como propriedades de strings decimais e DEVEM permanecer imutáveis depois da criação.
 
-#### Scenario: Wallet balance event
-- **WHEN** a transaction changes a Wallet balance
-- **THEN** `WalletBalanceChanged` contains event identity, correlation, Wallet version, direction and exact before/after Money properties
+#### Scenario: Evento de alteração de saldo da Wallet
+- **WHEN** uma transação altera o saldo de uma Wallet
+- **THEN** `WalletBalanceChanged` contém a identidade do evento, a correlação, a versão da Wallet, a direção e as propriedades Money exatas dos saldos anterior e posterior
