@@ -2,9 +2,13 @@
 
 > Este arquivo descreve a execução futura. Ele **não** autoriza implementação, criação de worktrees, início de subagentes, commits ou pushes. A execução só começa após aprovação explícita do usuário.
 
-## Grafo obrigatório da futura execução
+## Grafos obrigatórios da futura execução
 
-O grafo segue a configuração de subagentes documentada pela OpenAI em [Custom subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents): modelo, esforço de raciocínio, permissões e responsabilidade serão definidos por papel.
+As duas opções abaixo executam a mesma lista de tarefas e aplicam os mesmos gates. Muda apenas o provedor e o nome de cada papel.
+
+### Perfil A — Codex
+
+Este perfil segue a configuração documentada pela OpenAI em [Custom subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents): modelo, esforço de raciocínio, permissões e responsabilidade serão definidos por papel.
 
 ```text
 APROVAÇÃO EXPLÍCITA DO USUÁRIO
@@ -36,12 +40,81 @@ Terra revisa requisito + diff + testes
                     Raiz integra e verifica
 ```
 
-Regras do grafo:
+### Perfil B — OpenCode Go
+
+Este perfil usa o mapeamento publicado em [OpenCode Go Preset](https://github.com/alvinunreal/oh-my-opencode-slim/blob/master/docs/opencode-go-preset.md) e espelha o caminho crítico do Codex.
+
+```text
+APROVAÇÃO EXPLÍCITA DO USUÁRIO
+              |
+              v
+Orchestrator — minimax-m3 / thinking
+integra, verifica identidade Git, commita e publica
+              |
+              v
+Oracle supervisor — qwen3.7-max / max / somente leitura
+              |
+       define contrato e arquivos
+              |
+      +-------+-------+
+      |               |
+      v               v
+Fixer executor A  Fixer executor B
+deepseek-v4-flash / high
+worktree isolada worktree isolada
+      |               |
+      +-------+-------+
+              |
+              v
+Oracle revisa requisito + diff + testes
+         |                 |
+      REFAZER           APROVADO
+         |                 |
+         +-> Fixer          v
+                    Orchestrator integra e verifica
+```
+
+Explorer e Librarian (`deepseek-v4-flash/high`) podem investigar em paralelo e somente em leitura. Designer (`kimi-k2.7-code`) participa apenas de decisões de design; Observer (`mimo-v2.5`) participa apenas quando houver material visual. Eles não substituem Oracle no gate nem Fixer na implementação.
+
+### Início ou retomada — regra compartilhada
+
+```text
+Selecionar um perfil para a sessão
+              |
+              v
+Ler Git + checkboxes + commits + testes
+       |              |              |
+       v              v              v
+sem progresso    grupo concluído   diff parcial
+       |          com evidência        |
+       v              |                v
+começar em 1.1        v          retomar a tarefa
+                primeira tarefa   sem sobrescrever
+                  incompleta
+```
+
+- Trocar de Codex para OpenCode Go, ou no sentido contrário, não reinicia o plano: o coordenador retoma a primeira tarefa cujas dependências estejam concluídas e cuja evidência ainda falte.
+- A seleção do perfil, a autenticação e a resposta dos agentes são preflight de toda sessão; essa checagem não é pulada quando a tarefa 1.1 já estiver marcada.
+- Checkbox sem commit/teste correspondente não comprova conclusão; a tarefa é reaberta. Diff parcial é preservado, revisado e continuado no mesmo grupo.
+- No OpenCode Go, reutilizar uma configuração existente. Instalar com `--preset=opencode-go` somente quando ausente; para uma instalação já preparada, selecionar `/preset opencode-go`, garantir Observer habilitado quando necessário, autenticar, atualizar modelos e verificar os agentes antes de retomar. Nunca usar `--reset` automaticamente.
+- Um único perfil coordena cada sessão. Os dois perfis nunca escrevem simultaneamente na mesma worktree.
+
+Nomes compartilhados no restante deste arquivo:
+
+- **Coordenador:** Raiz no Codex; Orchestrator no OpenCode Go.
+- **Supervisor:** Terra no Codex; Oracle no OpenCode Go.
+- **Executor:** Luna no Codex; Fixer no OpenCode Go.
+
+### Regras compartilhadas dos grafos
 
 - A raiz mantém uma Terra supervisora e, no máximo, duas Lunas executoras simultâneas; isso ocupa os quatro slots totais contando a raiz.
+- O Orchestrator mantém um Oracle supervisor e, no máximo, dois trabalhos Fixer simultâneos.
 - Cada Luna recebe uma tarefa pequena, critérios de aceite e propriedade exclusiva de arquivos em uma worktree isolada. Arquivos compartilhados, migrations, manifesto de dependências e configuração global nunca são editados em paralelo.
+- Cada Fixer segue a mesma regra de propriedade exclusiva e worktree isolada.
 - Terra não implementa: revisa o diff, executa ou confere as verificações e responde `APROVADO` ou `REFAZER` com evidência objetiva.
+- Oracle não implementa: aplica o mesmo gate no OpenCode Go.
 - A raiz só integra após `APROVADO`; antes de cada commit ou push confere `git config user.name`, `git config user.email` e `gh api user`, que devem identificar `andredw13L`.
+- Orchestrator executa o mesmo preflight antes de integrar ou publicar.
 - Cada grupo abaixo termina em comportamento executável, testes verdes e um commit. Nenhum executor publica diretamente.
 - Se a propriedade de arquivos se sobrepuser ou o contrato precisar crescer, a tarefa deixa de ser paralela e volta à supervisão.
 
@@ -54,18 +127,18 @@ Dependências entre grupos:
                     +-> 8+
 ```
 
-Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela quando Terra confirmar que os arquivos são disjuntos; no máximo duas Lunas trabalham ao mesmo tempo.
+Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela quando o Supervisor confirmar que os arquivos são disjuntos; no máximo dois Executores trabalham ao mesmo tempo.
 
 ## 1. Grafo configurado e aplicação inicializável
 
 **Depende de:** aprovação explícita do usuário.
 
-- [ ] 1.1 [OpenAI Custom subagents] Criar a configuração local mínima dos papéis `terra-supervisor` e `luna-executor`, ambos com `model_reasoning_effort = "xhigh"`, Terra somente leitura, Luna limitada à worktree atribuída e máximo de três subagentes; evidência: configuração carregada e papéis listados sem iniciar execução.
+- [ ] 1.1 [OpenAI Custom subagents; OpenCode Go Preset] Selecionar um único perfil para a sessão e preparar somente seus papéis: `terra-supervisor`/`luna-executor` em `xhigh` no Codex, ou Orchestrator/Oracle/Fixer do preset `opencode-go` sem `--reset`; evidência: perfil ativo e agentes esperados respondendo sem iniciar a implementação.
 - [ ] 1.2 [Executar com Bun e Docker Compose] Inicializar o workspace Bun, TypeScript estrito e os três processos NestJS nas portas 3101–3103 com uma única base de código; evidência: build e três processos respondendo localmente.
 - [ ] 1.3 [Validar configuração do ambiente de execução; Manter a autenticação externa] Validar variáveis na inicialização e fornecer somente o `ProviderIdentityPort` com guard sem autenticação real; evidência: teste de configuração válida e falha imediata para variável ausente ou inválida.
 - [ ] 1.4 [Executar com Bun e Docker Compose] Subir PostgreSQL 16 e LocalStack 3.8.1 no Compose e criar `wager-transactions.fifo`, sua DLQ e `wager-events.fifo`; evidência: script de prontidão confirma as três filas e a conexão com o banco.
 - [ ] 1.5 [Separar disponibilidade do processo e prontidão] Implementar liveness local e readiness de PostgreSQL + SQS; evidência: testes mostram liveness saudável com dependência indisponível e readiness degradada.
-- [ ] 1.6 Executar instalação limpa, typecheck, build e testes da fatia; Terra registra `APROVADO`, então a raiz confere a identidade `andredw13L` e cria o commit da fatia.
+- [ ] 1.6 Executar instalação limpa, typecheck, build e testes da fatia; o Supervisor registra `APROVADO`, então o Coordenador confere a identidade `andredw13L` e cria o commit da fatia.
 
 ## 2. Domínio financeiro puro
 
@@ -75,7 +148,7 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 - [ ] 2.2 [Money exato e imutável; Construção controlada do domínio] Implementar o menor value object `Money` e os factories de criação/reconstituição necessários, reutilizando primitivas da plataforma e sem camada genérica adicional.
 - [ ] 2.3 [Invariantes da Wallet; Entrada de Ledger auditável] Escrever testes das transições de saldo, proibição de saldo negativo, versão e imutabilidade/auditoria do Ledger.
 - [ ] 2.4 [Máquina de estados de WagerTransaction; Eventos de integração tipados] Implementar Wallet, WagerTransaction, LedgerEntry e eventos tipados com as transições permitidas pelo spec.
-- [ ] 2.5 [Verificar o comportamento financeiro puro] Executar a suíte unitária sem PostgreSQL, SQS ou mocks de infraestrutura; Terra revisa as invariantes, aprova e a raiz faz o preflight Git e o commit.
+- [ ] 2.5 [Verificar o comportamento financeiro puro] Executar a suíte unitária sem PostgreSQL, SQS ou mocks de infraestrutura; o Supervisor revisa as invariantes, aprova e o Coordenador faz o preflight Git e o commit.
 
 ## 3. Wallet persistida de ponta a ponta
 
@@ -86,7 +159,7 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 - [ ] 3.3 [Money exato e imutável] Mapear entidades MikroORM preservando valores monetários como strings decimais na ida e na volta; evidência: teste de round-trip exato.
 - [ ] 3.4 [Criar Wallet atomicamente] Implementar criação atômica de Wallet, Ledger de abertura e evento Outbox na mesma transação.
 - [ ] 3.5 [Criar Wallet atomicamente; Consultar Wallet] Expor `POST /wallets` e `GET /wallets/:id` com os códigos 201, 404 e 409 definidos no design.
-- [ ] 3.6 Executar testes de atomicidade, duplicidade, constraints e round-trip; Terra aprova o diff e a raiz confere `andredw13L` antes do commit.
+- [ ] 3.6 Executar testes de atomicidade, duplicidade, constraints e round-trip; o Supervisor aprova o diff e o Coordenador confere `andredw13L` antes do commit.
 
 ## 4. Ledger paginado e reconciliação
 
@@ -96,7 +169,7 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 - [ ] 4.2 [Paginar o Ledger imutável] Implementar `GET /wallets/:id/ledger` com paginação por chave e sem alterar entradas históricas.
 - [ ] 4.3 [Reconciliar Wallet e Ledger] Escrever testes para saldo reconciliado, divergência exata e ausência de autocorreção.
 - [ ] 4.4 [Reconciliar Wallet e Ledger; Emitir logs estruturados e seguros] Implementar o endpoint de reconciliação, log estruturado e métrica da divergência sem dados sensíveis.
-- [ ] 4.5 Executar os testes e consultar diretamente as tabelas para provar a invariante; Terra aprova e a raiz faz o preflight Git e o commit.
+- [ ] 4.5 Executar os testes e consultar diretamente as tabelas para provar a invariante; o Supervisor aprova e o Coordenador faz o preflight Git e o commit.
 
 ## 5. BET, WIN, LOSS e idempotência compartilhada
 
@@ -107,7 +180,7 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 - [ ] 5.3 [Serializar por Wallet as operações que alteram saldo; Aplicar as regras de BET, WIN e LOSS] Implementar BET e WIN com `FOR UPDATE`, LOSS sem lock de Wallet, e persistir Wallet, WagerTransaction, Ledger e Outbox atomicamente.
 - [ ] 5.4 [Consultar transações de apostas; Distinguir resultados de erros de infraestrutura] Expor comandos e consultas HTTP com os mapeamentos 200, 202, 404, 409, 422 e 503 do design.
 - [ ] 5.5 [Verificar integração com PostgreSQL e SQS; Provar correção na disputa por saldo] Executar testes reais de rollback, idempotência concorrente, disputa por saldo e independência entre Wallets.
-- [ ] 5.6 Terra confere regras financeiras, SQL/locks e evidências; somente após `APROVADO` a raiz verifica `andredw13L` e cria o commit.
+- [ ] 5.6 O Supervisor confere regras financeiras, SQL/locks e evidências; somente após `APROVADO` o Coordenador verifica `andredw13L` e cria o commit.
 
 ## 6. Reversões e referências fora de ordem
 
@@ -117,7 +190,7 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 - [ ] 6.2 [Aplicar reversões integrais uma única vez] Implementar reversões travando a Wallet antes de ler a referência e persistindo resultado, Ledger e Outbox na mesma transação.
 - [ ] 6.3 [Recuperar referências entregues fora de ordem] Implementar estado pendente e worker de nova tentativa com uma linha por transação, `FOR UPDATE SKIP LOCKED`, máximo 8, base 1 s e teto 60 s configuráveis.
 - [ ] 6.4 [Provar recuperação de reversão fora de ordem] Testar referência posterior, concorrência entre workers, esgotamento e reinicialização com PostgreSQL real.
-- [ ] 6.5 Terra revisa ordem dos locks, limites e evidências; após aprovação, a raiz executa o preflight Git e cria o commit.
+- [ ] 6.5 O Supervisor revisa ordem dos locks, limites e evidências; após aprovação, o Coordenador executa o preflight Git e cria o commit.
 
 ## 7. Consumo SQS com Inbox e DLQ
 
@@ -128,7 +201,7 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 - [ ] 7.3 [Deduplicar entregas com Inbox transacional] Persistir Inbox e efeito financeiro na mesma transação, confirmando a mensagem apenas depois do commit.
 - [ ] 7.4 [Classificar falhas para confirmação e redirecionamento] Confirmar resultados de negócio, repetir falhas transitórias e deixar falhas inválidas/permanentes chegarem à DLQ após cinco recebimentos.
 - [ ] 7.5 [Encerrar a mensageria com segurança] Parar novas leituras e aguardar o trabalho em curso dentro do limite configurado.
-- [ ] 7.6 [Verificar integração com PostgreSQL e SQS] Executar no LocalStack testes de redelivery, novo messageId, conflito idempotente, DLQ e shutdown; Terra aprova e a raiz faz preflight Git e commit.
+- [ ] 7.6 [Verificar integração com PostgreSQL e SQS] Executar no LocalStack testes de redelivery, novo messageId, conflito idempotente, DLQ e shutdown; o Supervisor aprova e o Coordenador faz preflight Git e commit.
 
 ## 8. Publicação Outbox e observabilidade
 
@@ -138,7 +211,7 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 - [ ] 8.2 [Publicar eventos da Outbox transacional] Manter `eventId` estável, deduplicação FIFO como otimização e ciclo imediato quando há trabalho, com espera de 1 s quando vazio.
 - [ ] 8.3 [Emitir logs estruturados e seguros; Expor métricas obrigatórias] Adicionar somente os logs e as sete métricas exigidas pelo spec, incluindo contexto de correlação sem payload financeiro sensível.
 - [ ] 8.4 [Provar publicação concorrente da Outbox] Testar dois publishers, indisponibilidade do broker, falha após publicação antes da confirmação no banco e possível duplicata com o mesmo `eventId`.
-- [ ] 8.5 Terra revisa lock, repetição, métricas e evidências; após `APROVADO`, a raiz confere a identidade Git e cria o commit.
+- [ ] 8.5 O Supervisor revisa lock, repetição, métricas e evidências; após `APROVADO`, o Coordenador confere a identidade Git e cria o commit.
 
 ## 9. Provas distribuídas e de recuperação
 
@@ -150,7 +223,7 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 - [ ] 9.4 [Provar recuperação depois da confirmação e antes da confirmação no SQS] Encerrar um processo após commit e antes do ack, reiniciar e provar redelivery sem efeito duplicado.
 - [ ] 9.5 [Provar publicação concorrente da Outbox; Provar recuperação de reversão fora de ordem; Provar consistência após reinicialização] Cobrir dois publishers, reversão antes da referência e reinicialização com estado persistido.
 - [ ] 9.6 [Afirmar a invariante financeira final] Ao final de cada cenário, consultar Wallet, Ledger, WagerTransaction, Inbox e Outbox e afirmar saldo, cardinalidade e versões exatas.
-- [ ] 9.7 Executar a suíte distribuída completa; Terra só aprova com três PIDs/portas e consultas finais registradas, então a raiz faz preflight Git e commit.
+- [ ] 9.7 Executar a suíte distribuída completa; o Supervisor só aprova com três PIDs/portas e consultas finais registradas, então o Coordenador faz preflight Git e commit.
 
 ## 10. Entrega reproduzível
 
@@ -161,4 +234,4 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 - [ ] 10.3 Executar migration `up -> down -> up`, typecheck, build e todas as suítes unitárias, integração LocalStack/PostgreSQL e distribuídas em ambiente limpo.
 - [ ] 10.4 Conferir requisito por requisito do README e dos seis specs, anexando a cada item o teste ou comando que o prova; qualquer lacuna volta ao grupo responsável.
 - [ ] 10.5 Manter ledger de partidas dobradas, OpenTelemetry, dashboard e teste de carga fora desta mudança; incluir teste de carga somente mediante aprovação separada depois de todos os requisitos obrigatórios verdes.
-- [ ] 10.6 Terra realiza a revisão final de spec, diff e evidências; após `APROVADO`, a raiz confere `andredw13L`, cria o commit final e só publica se essa ação continuar autorizada.
+- [ ] 10.6 O Supervisor realiza a revisão final de spec, diff e evidências; após `APROVADO`, o Coordenador confere `andredw13L`, cria o commit final e só publica se essa ação continuar autorizada.
