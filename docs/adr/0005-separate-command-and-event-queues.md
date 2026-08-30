@@ -1,3 +1,3 @@
-# Separate command and event queues
+# Separar filas de comandos e eventos
 
-Provider commands arrive through `wager-transactions.fifo` with its DLQ, while Outbox events are published to `wager-events.fifo`; both group messages by Wallet. FIFO ordering and short-window deduplication are delivery optimizations only—PostgreSQL constraints, Inbox and idempotency remain the correctness mechanisms.
+Os comandos dos provedores chegam pela `wager-transactions.fifo`, acompanhada de sua DLQ, enquanto os eventos da Outbox são publicados na `wager-events.fifo`; ambas agrupam mensagens por Wallet. A ordenação FIFO e a deduplicação de curta duração são apenas otimizações de entrega; as restrições do PostgreSQL, a Inbox e a idempotência continuam sendo os mecanismos de correção.

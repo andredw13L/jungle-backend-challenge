@@ -1,3 +1,3 @@
-# Coordinate wallet writes in PostgreSQL
+# Coordenar escritas da Wallet no PostgreSQL
 
-Balance-changing operations use `READ COMMITTED` transactions and `SELECT ... FOR UPDATE` on one Wallet, while `version` records each balance change and outbox publishers use `SKIP LOCKED`. This keeps correctness shared across instances without a global lock; a hot Wallet is deliberately serialized instead of causing an optimistic retry storm.
+As operações que alteram saldo usam transações `READ COMMITTED` e `SELECT ... FOR UPDATE` em uma Wallet, enquanto `version` registra cada alteração de saldo e os publicadores da Outbox usam `SKIP LOCKED`. Isso mantém a correção compartilhada entre instâncias sem um bloqueio global; uma Wallet disputada é serializada deliberadamente em vez de provocar uma tempestade de novas tentativas otimistas.

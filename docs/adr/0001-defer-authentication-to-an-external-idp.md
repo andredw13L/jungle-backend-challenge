@@ -1,3 +1,3 @@
-# Defer authentication to an external identity provider
+# Adiar a autenticação para um provedor externo de identidade
 
-Authentication is intentionally not implemented because it has no score in the challenge and a production design would delegate it to an OIDC provider rather than store credentials locally. A no-op guard and `ProviderIdentityPort` keep the integration point explicit; health endpoints remain public and SQS remains a trusted internal channel.
+A autenticação não será implementada porque não vale pontos no desafio e, em produção, seria delegada a um provedor OIDC em vez de armazenar credenciais localmente. Um guard sem efeito e `ProviderIdentityPort` deixam explícito o ponto de integração; os endpoints de health permanecem públicos e o SQS continua sendo um canal interno confiável.

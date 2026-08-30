@@ -1,6 +1,6 @@
 ## Contexto
 
-O repositório contém apenas o enunciado e a configuração inicial do OpenSpec. O serviço precisa ser construído com Bun, NestJS, MikroORM, PostgreSQL e SQS, mantendo correção financeira quando requisições e mensagens são duplicadas, concorrentes, entregues fora de ordem ou interrompidas por encerramento abrupto. O README é o contrato autoritativo; o glossário canônico está em `GLOSSARY.md` e as decisões aprovadas estão em `docs/adr`.
+O repositório contém apenas o enunciado e a configuração inicial do OpenSpec. O serviço precisa ser construído com Bun, NestJS, MikroORM, PostgreSQL e SQS, mantendo correção financeira quando requisições e mensagens são duplicadas, concorrentes, entregues fora de ordem ou interrompidas por encerramento abrupto. O README é o contrato autoritativo e as decisões aprovadas estão em `docs/adr`.
 
 ## Objetivos e itens fora do escopo principal
 

@@ -1,3 +1,3 @@
-# Use a transactional inbox and outbox
+# Usar Inbox e Outbox transacionais
 
-HTTP and SQS call the same `ProcessWager` interface, and PostgreSQL atomically persists the transaction, Wallet change, Ledger entry, optional Inbox record and Outbox events. SQS acknowledgement and event publication happen only after commit, so at-least-once delivery may duplicate messages but cannot duplicate financial effects.
+HTTP e SQS chamam a mesma interface `ProcessWager`, e o PostgreSQL persiste atomicamente a transação, a alteração da Wallet, a entrada do Ledger, o registro opcional da Inbox e os eventos da Outbox. A confirmação no SQS e a publicação dos eventos acontecem somente depois da confirmação no banco; assim, a entrega pelo menos uma vez pode duplicar mensagens, mas não os efeitos financeiros.

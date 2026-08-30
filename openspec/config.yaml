@@ -7,7 +7,7 @@ context: |
   Financial values are decimal strings in code and NUMERIC(18,2) in PostgreSQL.
   Correctness must hold across at least three application processes.
   Authentication is intentionally deferred to an external IdP through a no-op seam.
-  Architectural decisions live in docs/adr and canonical language lives in GLOSSARY.md.
+  Architectural decisions live in docs/adr.
 
 rules:
   proposal:
