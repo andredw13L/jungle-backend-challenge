@@ -175,12 +175,12 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 
 **Depende de:** grupos 2 e 3.
 
-- [ ] 5.1 [Validar contratos de apostas; Persistir idempotência e reprodução] Escrever testes de DTO, hash canônico do payload, repetição idêntica e conflito de chave com payload diferente.
-- [ ] 5.2 [Persistir idempotência e reprodução] Implementar `ProcessWager.execute()` com isolamento `READ COMMITTED`, disputa insert-first da constraint e reprodução do resultado persistido.
-- [ ] 5.3 [Serializar por Wallet as operações que alteram saldo; Aplicar as regras de BET, WIN e LOSS] Implementar BET e WIN com `FOR UPDATE`, LOSS sem lock de Wallet, e persistir Wallet, WagerTransaction, Ledger e Outbox atomicamente.
-- [ ] 5.4 [Consultar transações de apostas; Distinguir resultados de erros de infraestrutura] Expor comandos e consultas HTTP com os mapeamentos 200, 202, 404, 409, 422 e 503 do design.
-- [ ] 5.5 [Verificar integração com PostgreSQL e SQS; Provar correção na disputa por saldo] Executar testes reais de rollback, idempotência concorrente, disputa por saldo e independência entre Wallets.
-- [ ] 5.6 O Supervisor confere regras financeiras, SQL/locks e evidências; somente após `APROVADO` o Coordenador verifica `andredw13L` e cria o commit.
+- [x] 5.1 [Validar contratos de apostas; Persistir idempotência e reprodução] Escrever testes de DTO, hash canônico do payload, repetição idêntica e conflito de chave com payload diferente.
+- [x] 5.2 [Persistir idempotência e reprodução] Implementar `ProcessWager.execute()` com isolamento `READ COMMITTED`, disputa insert-first da constraint e reprodução do resultado persistido.
+- [x] 5.3 [Serializar por Wallet as operações que alteram saldo; Aplicar as regras de BET, WIN e LOSS] Implementar BET e WIN com `FOR UPDATE`, LOSS sem lock de Wallet, e persistir Wallet, WagerTransaction, Ledger e Outbox atomicamente.
+- [x] 5.4 [Consultar transações de apostas; Distinguir resultados de erros de infraestrutura] Expor comandos e consultas HTTP com os mapeamentos 200, 202, 404, 409, 422 e 503 do design.
+- [x] 5.5 [Verificar integração com PostgreSQL e SQS; Provar correção na disputa por saldo] Executar testes reais de rollback, idempotência concorrente, disputa por saldo e independência entre Wallets.
+- [x] 5.6 O Supervisor confere regras financeiras, SQL/locks e evidências; somente após `APROVADO` o Coordenador verifica `andredw13L` e cria o commit.
 
 ## 6. Reversões e referências fora de ordem
 

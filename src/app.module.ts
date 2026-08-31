@@ -3,8 +3,9 @@ import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
 import { ObservabilityModule } from './observability/logger.module';
 import { WalletsModule } from './wallets/wallets.module';
+import { WageringModule } from './wagering/wagering.module';
 
 @Module({
-  imports: [ObservabilityModule, HealthModule, AuthModule, WalletsModule],
+  imports: [ObservabilityModule, HealthModule, AuthModule, WalletsModule, WageringModule],
 })
 export class AppModule {}

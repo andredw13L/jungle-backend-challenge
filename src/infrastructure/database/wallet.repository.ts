@@ -1,6 +1,6 @@
 import { Inject } from '@nestjs/common';
 import type { Pool, PoolClient } from 'pg';
-import type { Money } from '../../domain/money';
+import type { MoneyProps } from '../../domain/money';
 import { POOL } from './pool';
 
 export interface WalletRow {
@@ -58,7 +58,7 @@ export class WalletRepository {
   async createAtomic(input: {
     id: string;
     playerId: string;
-    initialBalance: Money;
+    initialBalance: MoneyProps;
     correlationId?: string;
   }): Promise<OpeningResult> {
     const client = await this.pool.connect();
@@ -80,7 +80,7 @@ export class WalletRepository {
     input: {
       id: string;
       playerId: string;
-      initialBalance: Money;
+      initialBalance: MoneyProps;
       correlationId?: string;
     },
   ): Promise<OpeningResult> {
@@ -116,9 +116,16 @@ export class WalletRepository {
       `INSERT INTO wager_transactions
          (type, status, wallet_id, provider_id, external_transaction_id,
           amount_amount, amount_currency, payload_hash, idempotency_key, processed_at)
-       VALUES ('OPENING', 'PROCESSED', $1, '', '', $2, $3, '', $4, now())
+       VALUES ('OPENING', 'PROCESSED', $1, $2, $3, $4, $5, '', $6, now())
        RETURNING id`,
-      [wallet.id, input.initialBalance.amount, input.initialBalance.currency, `opening:${wallet.id}`],
+      [
+        wallet.id,
+        `internal:${wallet.id}`,
+        `opening:${wallet.id}`,
+        input.initialBalance.amount,
+        input.initialBalance.currency,
+        `opening:${wallet.id}`,
+      ],
     );
     const openingTxId = txInsert.rows[0]!.id;
 
