@@ -39,11 +39,17 @@ export function serializeHttpRequest(request: {
         },
         serializers: { req: serializeHttpRequest },
         // Safe logging: never emit financial payloads, tokens or credentials.
+        // Oracle slice-7 finding #4: the old top-level `'amount'`/`'money'`/
+        // `'balance'` redacted innocent debug logs that happened to use those
+        // key names. Financial fields are now scoped to request/response
+        // bodies only; secrets stay redacted at every depth (pino's `*.token`
+        // does not match a root-level `token`, so the bare names are kept).
         redact: {
           paths: [
-            'req.body', 'body', 'payload',
-            'amount', 'money', 'balance', '*.amount', '*.money', '*.balance',
             'password', 'token', 'secret', 'authorization', 'accessToken',
+            '*.password', '*.token', '*.secret', '*.authorization', '*.accessToken',
+            'req.body.amount', 'req.body.money', 'req.body.balance',
+            'res.balance', 'res.amount', 'res.money',
           ],
           censor: '[REDACTED]',
         },

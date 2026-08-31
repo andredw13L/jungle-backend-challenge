@@ -30,6 +30,11 @@ describe('sqs.client', () => {
     RETRY_MAX_SECONDS: 60,
     LOG_LEVEL: 'info',
     SHUTDOWN_TIMEOUT_MS: 15000,
+    // Slice 8 added these validated defaults to AppEnv; keep the fixture literal complete.
+    OUTBOX_POLL_INTERVAL_MS: 1000,
+    OUTBOX_BATCH_SIZE: 10,
+    OUTBOX_MAX_ATTEMPTS: 10,
+    OUTBOX_SHUTDOWN_TIMEOUT_MS: 10000,
   };
 
   test('queueUrl builds the localstack URL with the fixed account id', () => {

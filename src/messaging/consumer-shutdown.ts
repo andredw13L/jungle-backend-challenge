@@ -2,15 +2,17 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
 import type { AppEnv } from '../config/env';
 import type { CommandConsumer } from './command-consumer';
+import type { OutboxPublisher } from './outbox-publisher';
 
 /**
- * ConsumerShutdown — coordinates graceful shutdown for the command consumer.
+ * ConsumerShutdown — coordinates graceful shutdown for the command consumer
+ * and (slice 8) the outbox publisher.
  *
- * `signalShutdown()` stops the polling loop from starting new polls;
- * `waitForDrained(timeoutMs)` waits for in-flight messages to finish their
- * transaction (or returns false on the hard deadline). `run()` wires the
- * drain → app.close() → exit sequence for the SIGTERM/SIGINT handlers in
- * main.ts.
+ * Both loops register their in-flight work against this single coordinator
+ * (`beginWork`/`endWork`), so `signalShutdown()` stops new polls and
+ * `waitForDrained`/`drainAll` waits for every in-flight transaction. `run()`
+ * wires the drain → app.close() → exit sequence for the SIGTERM/SIGINT
+ * handlers in main.ts.
  */
 @Injectable()
 export class ConsumerShutdown {
@@ -57,11 +59,32 @@ export class ConsumerShutdown {
     });
   }
 
+  /**
+   * Generalised drain covering every worker that reports in-flight work
+   * against this coordinator (command consumer + outbox publisher).
+   */
+  drainAll(timeoutMs: number): Promise<boolean> {
+    return this.waitForDrained(timeoutMs);
+  }
+
   /** Full drain → close → exit sequence used by the process signal handlers. */
-  async run(app: INestApplication, consumer: CommandConsumer): Promise<void> {
-    void consumer; // the consumer is signalled via signalShutdown(); the loop observes isShuttingDown()
+  async run(
+    app: INestApplication,
+    consumer: CommandConsumer,
+    publisher?: OutboxPublisher,
+  ): Promise<void> {
+    void consumer; // signalled via signalShutdown(); loops observe isShuttingDown()
     this.signalShutdown();
-    const drained = await this.waitForDrained(this.env.SHUTDOWN_TIMEOUT_MS);
+    // Let the publisher's loop observe shutdown and return (it may be
+    // mid-sleep after draining its in-flight work); bounded by its own
+    // timeout so process.exit always follows.
+    if (publisher) {
+      await Promise.race([
+        publisher.waitForStopped(),
+        sleep(this.env.OUTBOX_SHUTDOWN_TIMEOUT_MS),
+      ]);
+    }
+    const drained = await this.drainAll(this.env.SHUTDOWN_TIMEOUT_MS);
     try {
       await app.close();
     } catch {
@@ -69,4 +92,8 @@ export class ConsumerShutdown {
     }
     process.exit(drained ? 0 : 1);
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

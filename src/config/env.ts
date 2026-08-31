@@ -35,6 +35,12 @@ const EnvSchema = z.object({
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace'])
     .default('info'),
   SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(15000),
+  // Outbox publisher (slice 8): poll cadence, per-cycle batch, and the
+  // retry ceiling for a permanently failing event.
+  OUTBOX_POLL_INTERVAL_MS: z.coerce.number().int().min(0).max(60000).default(1000),
+  OUTBOX_BATCH_SIZE: z.coerce.number().int().min(1).max(1000).default(10),
+  OUTBOX_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(10),
+  OUTBOX_SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(10000),
 });
 
 export type AppEnv = z.infer<typeof EnvSchema>;

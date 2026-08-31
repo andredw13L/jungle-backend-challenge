@@ -207,10 +207,10 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 
 **Depende de:** grupos 3 e 5.
 
-- [ ] 8.1 [Publicar eventos da Outbox transacional] Implementar publisher que busca uma linha vencida por transação com `FOR UPDATE SKIP LOCKED`, publica mantendo o lock e marca sucesso ou reagenda falha.
-- [ ] 8.2 [Publicar eventos da Outbox transacional] Manter `eventId` estável, deduplicação FIFO como otimização e ciclo imediato quando há trabalho, com espera de 1 s quando vazio.
-- [ ] 8.3 [Emitir logs estruturados e seguros; Expor métricas obrigatórias] Adicionar somente os logs e as sete métricas exigidas pelo spec, incluindo contexto de correlação sem payload financeiro sensível.
-- [ ] 8.4 [Provar publicação concorrente da Outbox] Testar dois publishers, indisponibilidade do broker, falha após publicação antes da confirmação no banco e possível duplicata com o mesmo `eventId`.
+- [x] 8.1 [Publicar eventos da Outbox transacional] Implementar publisher que busca uma linha vencida por transação com `FOR UPDATE SKIP LOCKED`, publica mantendo o lock e marca sucesso ou reagenda falha.
+- [x] 8.2 [Publicar eventos da Outbox transacional] Manter `eventId` estável, deduplicação FIFO como otimização e ciclo imediato quando há trabalho, com espera de 1 s quando vazio.
+- [x] 8.3 [Emitir logs estruturados e seguros; Expor métricas obrigatórias] Adicionar somente os logs e as sete métricas exigidas pelo spec, incluindo contexto de correlação sem payload financeiro sensível.
+- [x] 8.4 [Provar publicação concorrente da Outbox] Testar dois publishers, indisponibilidade do broker, falha após publicação antes da confirmação no banco e possível duplicata com o mesmo `eventId`.
 - [ ] 8.5 O Supervisor revisa lock, repetição, métricas e evidências; após `APROVADO`, o Coordenador confere a identidade Git e cria o commit.
 
 ## 9. Provas distribuídas e de recuperação

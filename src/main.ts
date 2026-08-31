@@ -6,6 +6,7 @@ import { AppModule } from './app.module';
 import { loadEnv } from './config/env';
 import { CommandConsumer } from './messaging/command-consumer';
 import { ConsumerShutdown } from './messaging/consumer-shutdown';
+import { OutboxPublisher } from './messaging/outbox-publisher';
 
 /**
  * Boot a single NestJS instance. The same codebase runs on PORT 3101, 3102
@@ -21,15 +22,18 @@ async function bootstrap(): Promise<void> {
 
   await app.listen(env.PORT);
 
-  // Start the SQS command consumer once the HTTP listener is up.
+  // Start the SQS command consumer and the outbox publisher once the HTTP
+  // listener is up.
   const consumer = app.get(CommandConsumer);
+  const publisher = app.get(OutboxPublisher);
   const shutdown = app.get(ConsumerShutdown);
   void consumer.start();
+  void publisher.start();
 
   // Manual signal handlers: NestJS shutdown hooks only fire on app.close(),
   // and the slice-9 harness sends SIGTERM to a dedicated test process.
-  process.on('SIGTERM', () => void shutdown.run(app, consumer));
-  process.on('SIGINT', () => void shutdown.run(app, consumer));
+  process.on('SIGTERM', () => void shutdown.run(app, consumer, publisher));
+  process.on('SIGINT', () => void shutdown.run(app, consumer, publisher));
 
   // ponytail: don't print the host; only the port matters for the harness.
   // eslint-disable-next-line no-console

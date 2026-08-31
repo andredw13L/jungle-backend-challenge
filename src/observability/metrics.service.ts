@@ -3,9 +3,11 @@ import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom
 
 /**
  * Thin wrapper over prom-client. Keeps one registry for process metrics, the
- * reconciliation divergence counter used by the wallet read path, and the
+ * reconciliation divergence counter used by the wallet read path, the
  * command-consumer counters (slice 7): inbox outcomes, DLQ redirects,
- * in-flight gauge, and processing latency.
+ * in-flight gauge, and processing latency; and the outbox/wallet metrics
+ * (slice 8): outbox lag gauge, wallet lock conflicts, and the
+ * published/failure observability counters.
  */
 @Injectable()
 export class MetricsService {
@@ -15,6 +17,10 @@ export class MetricsService {
   readonly consumerDlq: Counter<string>;
   readonly consumerInflight: Gauge<string>;
   readonly consumerProcessingSeconds: Histogram<string>;
+  readonly outboxLag: Gauge<string>;
+  readonly walletLockConflicts: Counter<string>;
+  readonly outboxPublished: Counter<string>;
+  readonly outboxPublishFailures: Counter<string>;
 
   constructor() {
     this.registry = new Registry();
@@ -45,6 +51,28 @@ export class MetricsService {
       help: 'Per-message processing latency (seconds)',
       registers: [this.registry],
     });
+    this.outboxLag = new Gauge({
+      name: 'outbox_lag_seconds',
+      help: 'Seconds since the oldest PENDING outbox event was created',
+      registers: [this.registry],
+    });
+    this.walletLockConflicts = new Counter({
+      name: 'wallet_lock_conflicts_total',
+      help: 'Wallet FOR UPDATE lock attempts that failed (55P03/NOWAIT/deadlock)',
+      registers: [this.registry],
+    });
+    this.outboxPublished = new Counter({
+      name: 'outbox_published_total',
+      help: 'Outbox events confirmed published to wager-events.fifo',
+      labelNames: ['event_type'],
+      registers: [this.registry],
+    });
+    this.outboxPublishFailures = new Counter({
+      name: 'outbox_publish_failures_total',
+      help: 'Outbox SendMessage failures by reason (network|throttle|permanent)',
+      labelNames: ['reason'],
+      registers: [this.registry],
+    });
   }
 
   recordReconciliationDivergence(): void {
@@ -65,6 +93,22 @@ export class MetricsService {
 
   observeConsumerProcessing(seconds: number): void {
     this.consumerProcessingSeconds.observe(seconds);
+  }
+
+  setOutboxLag(seconds: number): void {
+    this.outboxLag.set(seconds);
+  }
+
+  recordWalletLockConflict(): void {
+    this.walletLockConflicts.inc();
+  }
+
+  recordOutboxPublished(eventType: string): void {
+    this.outboxPublished.inc({ event_type: eventType });
+  }
+
+  recordOutboxPublishFailure(reason: string): void {
+    this.outboxPublishFailures.inc({ reason });
   }
 
   contentType(): string {
