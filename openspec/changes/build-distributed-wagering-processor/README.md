@@ -1,3 +1,3 @@
-# build-distributed-wagering-processor
+# Processador distribuído de apostas
 
-Implement the complete Jungle Gaming distributed wagering processor with financial correctness, persistent idempotency, multi-instance concurrency, reliable SQS processing and executable evidence for every mandatory README requirement.
+Implementar o processador distribuído de apostas da Jungle Gaming com correção financeira, idempotência persistente, concorrência entre múltiplas instâncias, processamento confiável por SQS e evidências executáveis para cada requisito obrigatório do README.
