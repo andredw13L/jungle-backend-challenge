@@ -144,11 +144,11 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 
 **Depende de:** grupo 1.
 
-- [ ] 2.1 [Money exato e imutável] Escrever primeiro testes para escala monetária, arredondamento proibido, moeda incompatível e serialização decimal sem `number`; evidência: testes falham antes da implementação e passam depois.
-- [ ] 2.2 [Money exato e imutável; Construção controlada do domínio] Implementar o menor value object `Money` e os factories de criação/reconstituição necessários, reutilizando primitivas da plataforma e sem camada genérica adicional.
-- [ ] 2.3 [Invariantes da Wallet; Entrada de Ledger auditável] Escrever testes das transições de saldo, proibição de saldo negativo, versão e imutabilidade/auditoria do Ledger.
-- [ ] 2.4 [Máquina de estados de WagerTransaction; Eventos de integração tipados] Implementar Wallet, WagerTransaction, LedgerEntry e eventos tipados com as transições permitidas pelo spec.
-- [ ] 2.5 [Verificar o comportamento financeiro puro] Executar a suíte unitária sem PostgreSQL, SQS ou mocks de infraestrutura; o Supervisor revisa as invariantes, aprova e o Coordenador faz o preflight Git e o commit.
+- [x] 2.1 [Money exato e imutável] Escrever primeiro testes para escala monetária, arredondamento proibido, moeda incompatível e serialização decimal sem `number`; evidência: testes falham antes da implementação e passam depois.
+- [x] 2.2 [Money exato e imutável; Construção controlada do domínio] Implementar o menor value object `Money` e os factories de criação/reconstituição necessários, reutilizando primitivas da plataforma e sem camada genérica adicional.
+- [x] 2.3 [Invariantes da Wallet; Entrada de Ledger auditável] Escrever testes das transições de saldo, proibição de saldo negativo, versão e imutabilidade/auditoria do Ledger.
+- [x] 2.4 [Máquina de estados de WagerTransaction; Eventos de integração tipados] Implementar Wallet, WagerTransaction, LedgerEntry e eventos tipados com as transições permitidas pelo spec.
+- [x] 2.5 [Verificar o comportamento financeiro puro] Executar a suíte unitária sem PostgreSQL, SQS ou mocks de infraestrutura; o Supervisor revisa as invariantes, aprova e o Coordenador faz o preflight Git e o commit.
 
 ## 3. Wallet persistida de ponta a ponta
 
