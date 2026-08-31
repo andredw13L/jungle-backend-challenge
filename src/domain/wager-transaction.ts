@@ -12,7 +12,7 @@ export type WagerType =
   | 'REFUND'
   | 'ROLLBACK';
 
-export type WagerStatus = 'PENDING' | 'PROCESSED' | 'REJECTED' | 'FAILED';
+export type WagerStatus = 'PENDING' | 'PENDING_REFERENCE' | 'PROCESSED' | 'REJECTED' | 'FAILED';
 
 export interface WagerTransactionSnapshot {
   id: string;

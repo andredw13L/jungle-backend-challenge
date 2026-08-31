@@ -48,7 +48,7 @@ Este perfil usa o mapeamento publicado em [OpenCode Go Preset](https://github.co
 APROVAÇÃO EXPLÍCITA DO USUÁRIO
               |
               v
-Orchestrator: minimax-m3 / thinking
+Orchestrator/requester: kimi-k3 / thinking
 integra, verifica identidade Git, commita e publica
               |
               v
@@ -60,7 +60,7 @@ Oracle supervisor: qwen3.7-max / max / somente leitura
       |               |
       v               v
 Fixer executor A  Fixer executor B
-deepseek-v4-flash / high
+glm-5.3-flash / high
 worktree isolada worktree isolada
       |               |
       +-------+-------+
@@ -186,10 +186,10 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 
 **Depende de:** grupo 5.
 
-- [ ] 6.1 [Aplicar reversões integrais uma única vez] Escrever testes para REFUND/ROLLBACK integral, direção correta, referência compatível, execução única e proibição de saldo negativo.
-- [ ] 6.2 [Aplicar reversões integrais uma única vez] Implementar reversões travando a Wallet antes de ler a referência e persistindo resultado, Ledger e Outbox na mesma transação.
-- [ ] 6.3 [Recuperar referências entregues fora de ordem] Implementar estado pendente e worker de nova tentativa com uma linha por transação, `FOR UPDATE SKIP LOCKED`, máximo 8, base 1 s e teto 60 s configuráveis.
-- [ ] 6.4 [Provar recuperação de reversão fora de ordem] Testar referência posterior, concorrência entre workers, esgotamento e reinicialização com PostgreSQL real.
+- [x] 6.1 [Aplicar reversões integrais uma única vez] Escrever testes para REFUND/ROLLBACK integral, direção correta, referência compatível, execução única e proibição de saldo negativo.
+- [x] 6.2 [Aplicar reversões integrais uma única vez] Implementar reversões travando a Wallet antes de ler a referência e persistindo resultado, Ledger e Outbox na mesma transação.
+- [x] 6.3 [Recuperar referências entregues fora de ordem] Implementar estado pendente e worker de nova tentativa com uma linha por transação, `FOR UPDATE SKIP LOCKED`, máximo 8, base 1 s e teto 60 s configuráveis.
+- [x] 6.4 [Provar recuperação de reversão fora de ordem] Testar referência posterior, concorrência entre workers, esgotamento e reinicialização com PostgreSQL real.
 - [ ] 6.5 O Supervisor revisa ordem dos locks, limites e evidências; após aprovação, o Coordenador executa o preflight Git e cria o commit.
 
 ## 7. Consumo SQS com Inbox e DLQ

@@ -19,9 +19,9 @@ export interface WalletBalanceChangedPayload {
  * `walletVersion` increments by exactly one per emission; consumers can use
  * it to detect missed events.
  */
-export class WalletBalanceChanged extends IntegrationEvent {
+export class WalletBalanceChanged extends IntegrationEvent<WalletBalanceChangedPayload> {
   readonly eventType = 'WalletBalanceChanged' as const;
-  readonly schemaVersion = 1 as const;
+  readonly version = 1 as const;
 
   constructor(
     eventId: string,
@@ -29,13 +29,13 @@ export class WalletBalanceChanged extends IntegrationEvent {
     correlationId: string | undefined,
     public readonly payload: WalletBalanceChangedPayload,
   ) {
-    super(eventId, occurredAt, correlationId);
+    super(eventId, occurredAt, correlationId, payload.walletId, payload);
     // ponytail: freeze after the subclass fields are assigned — freezing
     // inside `super()` blocks field initialisation.
     Object.freeze(this);
   }
 
   toJSON(): Record<string, unknown> {
-    return { ...this.envelope(), ...this.payload };
+    return super.toJSON();
   }
 }

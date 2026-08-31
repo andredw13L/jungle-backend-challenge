@@ -1,7 +1,11 @@
 import { Inject } from '@nestjs/common';
-import type { Pool, PoolClient } from 'pg';
+import { IsolationLevel } from '@mikro-orm/core';
+import type { EntityManager as PostgreSqlEntityManager } from '@mikro-orm/postgresql';
 import type { MoneyProps } from '../../domain/money';
-import { POOL } from './pool';
+import { WalletBalanceChanged } from '../../domain/events/wallet-balance-changed';
+import { v7 as uuidv7 } from 'uuid';
+import { MIKRO_ORM } from './entities';
+import type { AppOrm } from './orm.module';
 
 export interface WalletRow {
   id: string;
@@ -29,24 +33,24 @@ export interface OpeningResult {
  * All money fields are read as strings (pg's default for NUMERIC).
  */
 export class WalletRepository {
-  constructor(@Inject(POOL) private readonly pool: Pool) {}
+  constructor(@Inject(MIKRO_ORM) private readonly orm: Promise<AppOrm>) {}
 
   async findById(id: string): Promise<WalletRow | null> {
-    const r = await this.pool.query<RawWalletRow>(
+    const r = await (await this.orm).em.fork().execute<RawWalletRow[]>(
       `SELECT id, player_id, currency, balance_amount, balance_currency, version, created_at, updated_at
-       FROM wallets WHERE id = $1`,
+       FROM wallets WHERE id = ?`,
       [id],
     );
-    return r.rows[0] ? toWalletRow(r.rows[0]) : null;
+    return r[0] ? toWalletRow(r[0]) : null;
   }
 
   async findByPlayerAndCurrency(playerId: string, currency: string): Promise<WalletRow | null> {
-    const r = await this.pool.query<RawWalletRow>(
+    const r = await (await this.orm).em.fork().execute<RawWalletRow[]>(
       `SELECT id, player_id, currency, balance_amount, balance_currency, version, created_at, updated_at
-       FROM wallets WHERE player_id = $1 AND currency = $2`,
+       FROM wallets WHERE player_id = ? AND currency = ?`,
       [playerId, currency],
     );
-    return r.rows[0] ? toWalletRow(r.rows[0]) : null;
+    return r[0] ? toWalletRow(r[0]) : null;
   }
 
   /**
@@ -61,22 +65,15 @@ export class WalletRepository {
     initialBalance: MoneyProps;
     correlationId?: string;
   }): Promise<OpeningResult> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const result = await this.runCreate(client, input);
-      await client.query('COMMIT');
-      return result;
-    } catch (err) {
-      await client.query('ROLLBACK').catch(() => undefined);
-      throw err;
-    } finally {
-      client.release();
-    }
+    const orm = await this.orm;
+    return orm.em.fork().transactional(
+      (em) => this.runCreate(em, input),
+      { isolationLevel: IsolationLevel.READ_COMMITTED },
+    );
   }
 
   private async runCreate(
-    client: PoolClient,
+    em: PostgreSqlEntityManager,
     input: {
       id: string;
       playerId: string;
@@ -85,13 +82,19 @@ export class WalletRepository {
     },
   ): Promise<OpeningResult> {
     const zeroBalance = input.initialBalance.amount === '0.00';
-    const walletInsert = await client.query<{ id: string; created_at: Date; updated_at: Date }>(
+    const walletInsert = await em.execute<{ id: string; created_at: Date; updated_at: Date }[]>(
       `INSERT INTO wallets (id, player_id, currency, balance_amount, balance_currency, version)
-       VALUES ($1, $2, $3, $4, $3, 1)
+       VALUES (?, ?, ?, ?, ?, 1)
        RETURNING id, created_at, updated_at`,
-      [input.id, input.playerId, input.initialBalance.currency, input.initialBalance.amount],
+      [
+        input.id,
+        input.playerId,
+        input.initialBalance.currency,
+        input.initialBalance.amount,
+        input.initialBalance.currency,
+      ],
     );
-    const row = walletInsert.rows[0]!;
+    const row = walletInsert[0]!;
     const wallet: WalletRow = {
       id: row.id,
       playerId: input.playerId,
@@ -99,8 +102,8 @@ export class WalletRepository {
       balanceAmount: input.initialBalance.amount,
       balanceCurrency: input.initialBalance.currency,
       version: 1,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
+      createdAt: new Date(row.created_at),
+      updatedAt: new Date(row.updated_at),
     };
 
     if (zeroBalance) {
@@ -112,14 +115,15 @@ export class WalletRepository {
       };
     }
 
-    const txInsert = await client.query<{ id: string }>(
+    const txInsert = await em.execute<{ id: string }[]>(
       `INSERT INTO wager_transactions
-         (type, status, wallet_id, provider_id, external_transaction_id,
+         (type, status, wallet_id, player_id, provider_id, external_transaction_id,
           amount_amount, amount_currency, payload_hash, idempotency_key, processed_at)
-       VALUES ('OPENING', 'PROCESSED', $1, $2, $3, $4, $5, '', $6, now())
+       VALUES ('OPENING', 'PROCESSED', ?, ?, ?, ?, ?, ?, '', ?, now())
        RETURNING id`,
       [
         wallet.id,
+        wallet.playerId,
         `internal:${wallet.id}`,
         `opening:${wallet.id}`,
         input.initialBalance.amount,
@@ -127,43 +131,54 @@ export class WalletRepository {
         `opening:${wallet.id}`,
       ],
     );
-    const openingTxId = txInsert.rows[0]!.id;
+    const openingTxId = txInsert[0]!.id;
 
-    const entryInsert = await client.query<{ id: string }>(
+    const entryInsert = await em.execute<{ id: string }[]>(
       `INSERT INTO wallet_ledger_entries
          (direction, value_amount, value_currency,
           balance_before_amount, balance_before_currency,
           balance_after_amount, balance_after_currency,
           wallet_id, transaction_id)
-       VALUES ('CREDIT', $1, $2, 0, $2, $1, $2, $3, $4)
-       RETURNING id`,
-      [input.initialBalance.amount, input.initialBalance.currency, wallet.id, openingTxId],
-    );
-    const openingEntryId = entryInsert.rows[0]!.id;
-
-    const outboxInsert = await client.query<{ id: string }>(
-      `INSERT INTO outbox (event_id, event_type, schema_version, payload, status, next_attempt_at)
-       VALUES (uuidv7(), 'WalletBalanceChanged', 1, $1::jsonb, 'PENDING', now())
+       VALUES ('CREDIT', ?, ?, 0, ?, ?, ?, ?, ?)
        RETURNING id`,
       [
-        JSON.stringify({
-          walletId: wallet.id,
-          playerId: wallet.playerId,
-          currency: wallet.currency,
-          walletVersion: wallet.version,
-          direction: 'CREDIT',
-          value: { amount: input.initialBalance.amount, currency: input.initialBalance.currency },
-          balanceBefore: { amount: '0.00', currency: input.initialBalance.currency },
-          balanceAfter: {
-            amount: input.initialBalance.amount,
-            currency: input.initialBalance.currency,
-          },
-          transactionId: openingTxId,
-          correlationId: input.correlationId ?? null,
-        }),
+        input.initialBalance.amount,
+        input.initialBalance.currency,
+        input.initialBalance.currency,
+        input.initialBalance.amount,
+        input.initialBalance.currency,
+        wallet.id,
+        openingTxId,
       ],
     );
-    const outboxEventId = outboxInsert.rows[0]!.id;
+    const openingEntryId = entryInsert[0]!.id;
+
+    const openingEvent = new WalletBalanceChanged(
+      uuidv7(),
+      new Date(),
+      input.correlationId,
+      {
+        walletId: wallet.id,
+        playerId: wallet.playerId,
+        currency: wallet.currency,
+        walletVersion: wallet.version,
+        direction: 'CREDIT',
+        value: { amount: input.initialBalance.amount, currency: input.initialBalance.currency },
+        balanceBefore: { amount: '0.00', currency: input.initialBalance.currency },
+        balanceAfter: {
+          amount: input.initialBalance.amount,
+          currency: input.initialBalance.currency,
+        },
+        transactionId: openingTxId,
+      },
+    );
+    const outboxInsert = await em.execute<{ id: string }[]>(
+      `INSERT INTO outbox (event_id, event_type, schema_version, payload, status, next_attempt_at)
+       VALUES (?, ?, ?, ?::jsonb, 'PENDING', now())
+       RETURNING id`,
+      [openingEvent.eventId, openingEvent.eventType, openingEvent.version, JSON.stringify(openingEvent.toJSON())],
+    );
+    const outboxEventId = outboxInsert[0]!.id;
 
     return {
       wallet,
@@ -181,8 +196,8 @@ interface RawWalletRow {
   balance_amount: string | number;
   balance_currency: string;
   version: number | string;
-  created_at: Date;
-  updated_at: Date;
+  created_at: Date | string;
+  updated_at: Date | string;
 }
 
 function toWalletRow(r: RawWalletRow): WalletRow {
@@ -193,7 +208,7 @@ function toWalletRow(r: RawWalletRow): WalletRow {
     balanceAmount: String(r.balance_amount),
     balanceCurrency: r.balance_currency,
     version: Number(r.version),
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
+    createdAt: new Date(r.created_at),
+    updatedAt: new Date(r.updated_at),
   };
 }

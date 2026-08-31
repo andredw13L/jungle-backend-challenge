@@ -5,7 +5,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { Client } from 'pg';
 import { loadEnv } from '../../src/config/env';
-import { makePool } from '../../src/infrastructure/database/pool';
+import { createOrm } from '../../src/infrastructure/database/orm.module';
 import { WalletRepository } from '../../src/infrastructure/database/wallet.repository';
 import { LedgerRepository } from '../../src/wallets/ledger.repository';
 import {
@@ -14,9 +14,11 @@ import {
 } from '../../src/wallets/ledger-cursor';
 
 const env = loadEnv();
-const pool = makePool(env);
-const wallets = new WalletRepository(pool);
-const ledger = new LedgerRepository(pool);
+const orm = await createOrm(env);
+await orm.connect();
+const ormProvider = Promise.resolve(orm);
+const wallets = new WalletRepository(ormProvider);
+const ledger = new LedgerRepository(ormProvider);
 const admin = new Client({ connectionString: env.DATABASE_URL });
 
 async function truncateAll(): Promise<void> {
@@ -34,7 +36,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   await admin.end().catch(() => undefined);
-  await pool.end().catch(() => undefined);
+  await orm.close(true);
 });
 
 /**
@@ -128,12 +130,12 @@ describe('POST /wallets/:id/reconciliation', () => {
     // Sum of 3 credits of 10.00 = 30.00; wallet balance stays at 0 since we opened zero.
     // Reconciliation reads wallet.balance_amount (0.00) vs ledger computed (30.00) → divergent.
     const result = await ledger.reconcile(id);
-    expect(result.entryCount).toBe(3);
-    expect(result.ledgerComputed.amount).toBe('30.00');
+    expect(result.checkedEntries).toBe(3);
+    expect(result.calculatedBalance.amount).toBe('30.00');
     // The opening path adds nothing because initialBalance was 0.00; wallet balance is 0.
-    expect(result.walletBalance.amount).toBe('0.00');
+    expect(result.storedBalance.amount).toBe('0.00');
     expect(result.consistent).toBe(false);
-    expect(result.divergence.amount).toBe('-30.00');
+    expect(result.difference.amount).toBe('-30.00');
   });
 
   test('balanced reconciliation when wallet balance equals ledger sum', async () => {
@@ -146,10 +148,10 @@ describe('POST /wallets/:id/reconciliation', () => {
     // After opening 100.00 credit, wallet=100.00, ledger sum=100.00 → consistent.
     const result = await ledger.reconcile(id);
     expect(result.consistent).toBe(true);
-    expect(result.walletBalance.amount).toBe('100.00');
-    expect(result.ledgerComputed.amount).toBe('100.00');
-    expect(result.divergence.amount).toBe('0.00');
-    expect(result.entryCount).toBe(1);
+    expect(result.storedBalance.amount).toBe('100.00');
+    expect(result.calculatedBalance.amount).toBe('100.00');
+    expect(result.difference.amount).toBe('0.00');
+    expect(result.checkedEntries).toBe(1);
   });
 
   test('does not mutate wallet state (read-only)', async () => {

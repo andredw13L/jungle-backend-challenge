@@ -87,4 +87,29 @@ describe('HealthController', () => {
     expect(response.status).toBe('error');
     expect(response.error.sqs?.status).toBe('down');
   });
+
+  test('PostgreSQL probe hides connection and query details', async () => {
+    const orm = {
+      em: {
+        fork: () => ({
+          getConnection: () => ({
+            execute: async () => {
+              throw new Error('postgres://u:p@db/wagering SELECT balance_amount');
+            },
+          }),
+        }),
+      },
+    } as unknown as ConstructorParameters<typeof PostgresHealthIndicator>[0];
+    let caught: unknown;
+    try {
+      await new PostgresHealthIndicator(orm).check('postgres');
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(HealthCheckError);
+    expect((caught as HealthCheckError).causes).toEqual({
+      postgres: { status: 'down' },
+    });
+  });
 });

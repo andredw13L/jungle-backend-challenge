@@ -1,21 +1,16 @@
 import { Module } from '@nestjs/common';
-import { POOL } from '../infrastructure/database/pool';
-import { makePool } from '../infrastructure/database/pool';
-import { loadEnv } from '../config/env';
 import { ProcessWager } from './process-wager';
+import { PendingReferenceWorker } from './pending-reference.worker';
 import { WagerRepository } from './wager.repository';
-import { WageringController } from './wagering.controller';
+import { ProviderWageringController, WageringController } from './wagering.controller';
 
 @Module({
-  controllers: [WageringController],
+  controllers: [WageringController, ProviderWageringController],
   providers: [
-    {
-      provide: POOL,
-      useFactory: () => makePool(loadEnv()),
-    },
     WagerRepository,
     ProcessWager,
+    PendingReferenceWorker,
   ],
-  exports: [POOL, WagerRepository, ProcessWager],
+  exports: [WagerRepository, ProcessWager, PendingReferenceWorker],
 })
 export class WageringModule {}

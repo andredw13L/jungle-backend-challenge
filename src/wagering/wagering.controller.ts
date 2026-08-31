@@ -8,10 +8,18 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Res,
+  ServiceUnavailableException,
+  UseGuards,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { NoopIdentityGuard } from '../auth/noop-identity.guard';
+import { WagerInfrastructureError } from '../domain/errors';
+import { Money } from '../domain/money';
 import { SubmitWagerSchema, type SubmitWagerDto } from './dto/submit-wager.dto';
 import { ProcessWager } from './process-wager';
+import type { SubmitWagerInput } from './process-wager.types';
 import { WagerRepository } from './wager.repository';
 
 /**
@@ -21,6 +29,7 @@ import { WagerRepository } from './wager.repository';
  * and `(providerId, externalTransactionId)` resolve to the same row.
  */
 @Controller('wagering')
+@UseGuards(NoopIdentityGuard)
 export class WageringController {
   constructor(
     private readonly process: ProcessWager,
@@ -33,6 +42,7 @@ export class WageringController {
     @Body() body: unknown,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Headers('x-correlation-id') correlationId?: string,
+    @Res({ passthrough: true }) response?: Response,
   ) {
     if (!idempotencyKey) {
       throw new UnprocessableEntityException({
@@ -47,11 +57,33 @@ export class WageringController {
         issues: parsed.error.issues,
       });
     }
-    return this.process.execute({
-      ...(parsed.data as SubmitWagerDto),
+    const dto = parsed.data as SubmitWagerDto;
+    const money = Money.create(dto.money);
+    const submit: SubmitWagerInput = {
       idempotencyKey,
-      ...(correlationId ? { correlationId } : {}),
-    });
+      kind: dto.kind,
+      playerId: dto.playerId,
+      walletId: dto.walletId,
+      roundId: dto.roundId,
+      gameId: dto.gameId,
+      money: money.toJSON(),
+      externalTransactionId: dto.externalTransactionId,
+      providerId: dto.providerId,
+    };
+    if (correlationId) submit.correlationId = correlationId;
+    if (dto.referenceExternalTransactionId !== undefined) {
+      submit.referenceExternalTransactionId = dto.referenceExternalTransactionId;
+    }
+    try {
+      const result = await this.process.execute(submit);
+      if (result.status === 'PENDING') response?.status(202);
+      return result;
+    } catch (err) {
+      if (err instanceof WagerInfrastructureError || isTransientPostgresError(err)) {
+        throw new ServiceUnavailableException({ code: 'TRANSIENT_INFRASTRUCTURE' });
+      }
+      throw err;
+    }
   }
 
   @Get('transactions/:id')
@@ -80,29 +112,66 @@ export class WageringController {
   }
 }
 
+@Controller('providers')
+@UseGuards(NoopIdentityGuard)
+export class ProviderWageringController {
+  constructor(private readonly repo: WagerRepository) {}
+
+  @Get(':providerId/wagering/transactions/:externalTransactionId')
+  async findByProviderAndExternal(
+    @Param('providerId') providerId: string,
+    @Param('externalTransactionId') externalTransactionId: string,
+  ) {
+    const row = await this.repo.findByProviderAndExternal(providerId, externalTransactionId);
+    if (!row) throw new NotFoundException({ code: 'WAGER_NOT_FOUND' });
+    return toResponse(row);
+  }
+}
+
 function toResponse(row: {
   id: string;
   type: string;
   status: string;
   wallet_id: string;
+  player_id: string | null;
+  round_id: string | null;
+  game_id: string | null;
   provider_id: string;
   external_transaction_id: string;
   amount_amount: string;
   amount_currency: string;
+  reference_external_transaction_id: string | null;
+  reference: string | null;
   response_payload: Record<string, unknown> | null;
   failure_code: string | null;
   processed_at: Date | null;
 }) {
   return {
-    id: row.id,
-    type: row.type,
-    status: row.status,
-    walletId: row.wallet_id,
+    transactionId: row.id,
     providerId: row.provider_id,
     externalTransactionId: row.external_transaction_id,
-    amount: { amount: String(row.amount_amount), currency: row.amount_currency },
-    failureCode: row.failure_code,
-    response: row.response_payload,
-    processedAt: row.processed_at instanceof Date ? row.processed_at.toISOString() : null,
+    playerId: row.player_id,
+    walletId: row.wallet_id,
+    roundId: row.round_id,
+    gameId: row.game_id,
+    kind: row.type,
+    status: row.status,
+    money: { amount: String(row.amount_amount), currency: row.amount_currency },
+    ...(row.reference_external_transaction_id !== null
+      ? { referenceExternalTransactionId: row.reference_external_transaction_id }
+      : {}),
+    ...(row.reference !== null ? { referenceTransactionId: row.reference } : {}),
+    ...(row.failure_code !== null ? { failureCode: row.failure_code } : {}),
+    ...(row.response_payload !== null ? { response: row.response_payload } : {}),
+    ...(row.processed_at instanceof Date ? { processedAt: row.processed_at.toISOString() } : {}),
   };
+}
+
+function isTransientPostgresError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { code?: string; sqlState?: string; cause?: unknown; message?: string };
+  const sqlState = e.code ?? e.sqlState;
+  if (sqlState && ['40001', '08000', '08003', '08006', '57P01', '57P03'].includes(sqlState)) return true;
+  if (e.cause && isTransientPostgresError(e.cause)) return true;
+  return typeof e.message === 'string' && /ECONNRESET|ECONNREFUSED|connection terminated/i.test(e.message);
 }

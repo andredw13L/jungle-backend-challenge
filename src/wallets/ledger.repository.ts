@@ -1,6 +1,8 @@
-import { Inject, Injectable } from '@nestjs/common';
-import type { Pool } from 'pg';
-import { POOL } from '../infrastructure/database/pool';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { PinoLogger } from 'nestjs-pino';
+import { MIKRO_ORM } from '../infrastructure/database/entities';
+import type { AppOrm } from '../infrastructure/database/orm.module';
+import { MetricsService } from '../observability/metrics.service';
 import { encodeLedgerCursor, type LedgerCursor } from './ledger-cursor';
 
 export interface LedgerEntryView {
@@ -19,11 +21,12 @@ export interface LedgerPage {
 }
 
 export interface ReconciliationResult {
+  walletId: string;
+  storedBalance: { amount: string; currency: string };
+  calculatedBalance: { amount: string; currency: string };
+  difference: { amount: string; currency: string };
   consistent: boolean;
-  walletBalance: { amount: string; currency: string };
-  ledgerComputed: { amount: string; currency: string };
-  divergence: { amount: string; currency: string };
-  entryCount: number;
+  checkedEntries: number;
 }
 
 const DEFAULT_LIMIT = 50;
@@ -36,7 +39,11 @@ const MAX_LIMIT = 100;
  */
 @Injectable()
 export class LedgerRepository {
-  constructor(@Inject(POOL) private readonly pool: Pool) {}
+  constructor(
+    @Inject(MIKRO_ORM) private readonly orm: Promise<AppOrm>,
+    @Optional() private readonly metrics?: MetricsService,
+    @Optional() private readonly logger?: PinoLogger,
+  ) {}
 
   async pageLedger(
     walletId: string,
@@ -48,23 +55,23 @@ export class LedgerRepository {
     if (options.cursor) {
       params.push(options.cursor.createdAt);
       params.push(options.cursor.id);
-      cursorClause = `AND (created_at, id) < ($2::timestamptz, $3::uuid)`;
+      cursorClause = 'AND (created_at, id) < (?::timestamptz, ?::uuid)';
     }
     params.push(limit);
-    const limitParam = `$${params.length}`;
+    const limitParam = '?';
 
-    const r = await this.pool.query<RawLedgerRow>(
+    const r = await (await this.orm).em.fork().execute<RawLedgerRow[]>(
       `SELECT id, direction, value_amount, value_currency,
               balance_before_amount, balance_before_currency,
               balance_after_amount, balance_after_currency,
               transaction_id, created_at
        FROM wallet_ledger_entries
-       WHERE wallet_id = $1 ${cursorClause}
+       WHERE wallet_id = ? ${cursorClause}
        ORDER BY created_at DESC, id DESC
        LIMIT ${limitParam}`,
       params,
     );
-    const entries = r.rows.map(toView);
+    const entries = r.map(toView);
     const last = entries[entries.length - 1];
     const nextCursor =
       entries.length === limit && last
@@ -82,13 +89,13 @@ export class LedgerRepository {
   async reconcile(walletId: string): Promise<ReconciliationResult> {
     // Single LEFT JOIN query: PostgreSQL computes the divergence in NUMERIC,
     // so the value never leaves the schema's exact decimal domain.
-    const r = await this.pool.query<{
+    const r = await (await this.orm).em.fork().execute<{
       wallet_amount: string;
       balance_currency: string;
       computed: string | null;
       entries: string | number;
       divergence: string | null;
-    }>(
+    }[]>(
       `SELECT
          wb.balance_amount                                       AS wallet_amount,
          wb.balance_currency,
@@ -105,11 +112,11 @@ export class LedgerRepository {
          )                                                       AS divergence
        FROM wallets wb
        LEFT JOIN wallet_ledger_entries le ON le.wallet_id = wb.id
-       WHERE wb.id = $1
+       WHERE wb.id = ?
        GROUP BY wb.balance_amount, wb.balance_currency`,
       [walletId],
     );
-    const row = r.rows[0];
+    const row = r[0];
     if (!row) {
       throw new Error(`wallet ${walletId} not found`);
     }
@@ -118,12 +125,21 @@ export class LedgerRepository {
     const divergenceAmount = String(row.divergence);
     const divergence = { amount: divergenceAmount, currency: row.balance_currency };
     const consistent = divergenceAmount === '0.00';
+    const checkedEntries = Number(row.entries);
+    if (!consistent) {
+      this.metrics?.recordReconciliationDivergence();
+      this.logger?.warn(
+        { walletId, checkedEntries },
+        'wallet reconciliation divergence detected',
+      );
+    }
     return {
+      walletId,
+      storedBalance: walletBalance,
+      calculatedBalance: ledgerComputed,
+      difference: divergence,
       consistent,
-      walletBalance,
-      ledgerComputed,
-      divergence,
-      entryCount: Number(row.entries),
+      checkedEntries,
     };
   }
 }
@@ -138,7 +154,7 @@ interface RawLedgerRow {
   balance_after_amount: string;
   balance_after_currency: string;
   transaction_id: string;
-  created_at: Date;
+  created_at: Date | string;
 }
 
 function toView(r: RawLedgerRow): LedgerEntryView {
@@ -155,7 +171,7 @@ function toView(r: RawLedgerRow): LedgerEntryView {
       currency: r.balance_after_currency,
     },
     transactionId: r.transaction_id,
-    createdAt: r.created_at.toISOString(),
+    createdAt: new Date(r.created_at).toISOString(),
   };
 }
 

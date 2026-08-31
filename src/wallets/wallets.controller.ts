@@ -8,8 +8,10 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  UseGuards,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { NoopIdentityGuard } from '../auth/noop-identity.guard';
 import { CreateWalletSchema, type CreateWalletDto } from './dto/create-wallet.dto';
 import { LedgerQuerySchema } from './dto/ledger-query.dto';
 import { decodeLedgerCursor } from './ledger-cursor';
@@ -23,6 +25,7 @@ import { WalletCreationService } from './wallet-creation.service';
  * reports divergence without mutating state (200, 404).
  */
 @Controller('wallets')
+@UseGuards(NoopIdentityGuard)
 export class WalletsController {
   constructor(
     private readonly service: WalletCreationService,
@@ -37,7 +40,10 @@ export class WalletsController {
   ) {
     const parsed = CreateWalletSchema.safeParse(body);
     if (!parsed.success) {
-      return { code: 'INVALID_PAYLOAD', issues: parsed.error.issues };
+      throw new UnprocessableEntityException({
+        code: 'INVALID_PAYLOAD',
+        issues: parsed.error.issues,
+      });
     }
     const wallet = await this.service.create(parsed.data as CreateWalletDto, correlationId);
     return toWalletResponse(wallet);

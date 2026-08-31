@@ -37,7 +37,7 @@ export class WalletCreationService {
       if (isUniqueViolation(err, 'uq_wallet_player_currency')) {
         throw new ConflictException({
           code: 'WALLET_ALREADY_EXISTS',
-          message: `wallet already exists for player ${input.playerId} in ${input.currency}`,
+          message: `wallet already exists for player ${input.playerId} in ${input.initialBalance.currency}`,
         });
       }
       if (isUniqueViolation(err, 'uq_wager_idempotency_key')) {

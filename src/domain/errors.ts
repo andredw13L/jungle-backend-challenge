@@ -92,3 +92,14 @@ export class InvalidWagerTransitionError extends DomainError {
     this.name = 'InvalidWagerTransitionError';
   }
 }
+
+/** Stable application error for retryable database/connectivity failures. */
+export class WagerInfrastructureError extends Error {
+  readonly code = 'TRANSIENT_INFRASTRUCTURE' as const;
+  readonly status = 503 as const;
+
+  constructor(public readonly cause: unknown) {
+    super('wager processing is temporarily unavailable');
+    this.name = 'WagerInfrastructureError';
+  }
+}

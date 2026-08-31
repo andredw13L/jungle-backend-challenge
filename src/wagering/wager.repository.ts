@@ -1,147 +1,302 @@
-import { Inject, Injectable } from '@nestjs/common';
-import type { Pool, PoolClient } from 'pg';
-import { POOL } from '../infrastructure/database/pool';
-import { payloadHash } from '../domain/canonical-json';
+import { Inject } from '@nestjs/common';
+import type { EntityManager as PostgreSqlEntityManager } from '@mikro-orm/postgresql';
 import type { MoneyProps } from '../domain/money';
+import { payloadHash } from '../domain/canonical-json';
+import type { IntegrationEvent } from '../domain/events/integration-event';
+import { MIKRO_ORM } from '../infrastructure/database/entities';
+import type { AppOrm } from '../infrastructure/database/orm.module';
 
 /**
- * WagerRepository — raw SQL for the `wager_transactions` table and the
- * `FOR UPDATE` lock on the wallet row that slices 5/6 use for
- * per-wallet serialisation. Slice 5 reads from this; later slices
- * extend with reference-reversal helpers.
+ * WagerRepository — raw SQL for the `wager_transactions` table, the
+ * `FOR UPDATE` lock on the wallet row, and the worker helpers for
+ * PENDING_REFERENCE reversals. Slices 5/6 use this directly; slice 7
+ * extends the SQS consumer; slice 8 the Outbox publisher.
  */
-@Injectable()
 export class WagerRepository {
-  constructor(@Inject(POOL) private readonly pool: Pool) {}
+  constructor(@Inject(MIKRO_ORM) private readonly orm: Promise<AppOrm>) {}
 
-  /**
-   * Look up an existing wager transaction by idempotency key.
-   * Returns null when missing. Used by ProcessWager to detect replays.
-   */
   async findByIdempotencyKey(
-    client: PoolClient,
+    em: PostgreSqlEntityManager,
     idempotencyKey: string,
   ): Promise<WagerRow | null> {
-    const r = await client.query<WagerRow>(
-      `SELECT id, type, status, wallet_id, provider_id, external_transaction_id,
-              amount_amount, amount_currency, payload_hash, response_payload, failure_code
+    const r = await em.execute<WagerRow[]>(
+      `SELECT id, type, status, wallet_id, player_id, round_id, game_id,
+              provider_id, external_transaction_id, amount_amount, amount_currency,
+              reference_external_transaction_id, reference, payload_hash,
+              response_payload, failure_code, processed_at, reference_attempts
        FROM wager_transactions
-       WHERE idempotency_key = $1`,
+       WHERE idempotency_key = ?`,
       [idempotencyKey],
     );
-    return r.rows[0] ?? null;
+    return r[0] ?? null;
   }
 
-  /**
-   * Insert a PENDING wager transaction row. Caller is responsible for
-   * catching the 23505 unique violation and replaying from the
-   * persisted row.
-   */
   async insertPending(
-    client: PoolClient,
+    em: PostgreSqlEntityManager,
     input: {
       id: string;
-      type: 'BET' | 'WIN' | 'LOSS';
+      type: 'BET' | 'WIN' | 'LOSS' | 'REFUND' | 'ROLLBACK';
       walletId: string;
+      playerId: string;
+      roundId: string;
+      gameId: string;
       providerId: string;
       externalTransactionId: string;
       amount: MoneyProps;
       payloadHash: string;
       idempotencyKey: string;
+      referenceExternalTransactionId?: string | undefined;
     },
   ): Promise<{ id: string }> {
-    const r = await client.query<{ id: string }>(
+    const r = await em.execute<{ id: string }[]>(
       `INSERT INTO wager_transactions
-         (id, type, status, wallet_id, provider_id, external_transaction_id,
-          amount_amount, amount_currency, payload_hash, idempotency_key)
-       VALUES ($1, $2, 'PENDING', $3, $4, $5, $6, $7, $8, $9)
+         (id, type, status, wallet_id, player_id, round_id, game_id,
+          provider_id, external_transaction_id, amount_amount, amount_currency,
+          reference_external_transaction_id, payload_hash, idempotency_key)
+       VALUES (?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING id`,
       [
         input.id,
         input.type,
         input.walletId,
+        input.playerId,
+        input.roundId,
+        input.gameId,
         input.providerId,
         input.externalTransactionId,
         input.amount.amount,
         input.amount.currency,
+        input.referenceExternalTransactionId ?? null,
         input.payloadHash,
         input.idempotencyKey,
       ],
     );
-    return r.rows[0]!;
+    return r[0]!;
   }
 
-  async findByIdPublic(id: string): Promise<WagerRowWithTimestamp | null> {
-    const r = await this.pool.query<WagerRowWithTimestamp>(
-      `SELECT id, type, status, wallet_id, provider_id, external_transaction_id,
-              amount_amount, amount_currency, payload_hash, response_payload, failure_code, processed_at
-       FROM wager_transactions WHERE id = $1`,
+  async findByIdPublic(id: string): Promise<WagerRow | null> {
+    const r = await (await this.orm).em.fork().execute<WagerRow[]>(
+      `SELECT id, type, status, wallet_id, player_id, round_id, game_id,
+              provider_id, external_transaction_id, amount_amount, amount_currency,
+              reference_external_transaction_id, reference, payload_hash,
+              response_payload, failure_code, processed_at, reference_attempts
+       FROM wager_transactions WHERE id = ?`,
       [id],
     );
-    return r.rows[0] ?? null;
+    return r[0] ? toWagerRow(r[0]) : null;
   }
 
   async findByProviderAndExternal(
     providerId: string,
     externalTransactionId: string,
   ): Promise<WagerRow | null> {
-    const r = await this.pool.query<WagerRow>(
-      `SELECT id, type, status, wallet_id, provider_id, external_transaction_id,
-              amount_amount, amount_currency, payload_hash, response_payload, failure_code, processed_at
+    const r = await (await this.orm).em.fork().execute<WagerRow[]>(
+      `SELECT id, type, status, wallet_id, player_id, round_id, game_id,
+              provider_id, external_transaction_id, amount_amount, amount_currency,
+              reference_external_transaction_id, reference, payload_hash,
+              response_payload, failure_code, processed_at, reference_attempts
        FROM wager_transactions
-       WHERE provider_id = $1 AND external_transaction_id = $2`,
+       WHERE provider_id = ? AND external_transaction_id = ?`,
       [providerId, externalTransactionId],
     );
-    return r.rows[0] ?? null;
+    return r[0] ? toWagerRow(r[0]) : null;
+  }
+
+  async findReferenceByProviderExternal(
+    em: PostgreSqlEntityManager,
+    providerId: string,
+    externalTransactionId: string,
+  ): Promise<WagerRow | null> {
+    const r = await em.execute<WagerRow[]>(
+      `SELECT id, type, status, wallet_id, player_id, round_id, game_id,
+              provider_id, external_transaction_id, amount_amount, amount_currency,
+              reference_external_transaction_id, reference, payload_hash,
+              response_payload, failure_code, processed_at, reference_attempts
+       FROM wager_transactions
+       WHERE provider_id = ? AND external_transaction_id = ?
+       FOR UPDATE`,
+      [providerId, externalTransactionId],
+    );
+    return r[0] ? toWagerRow(r[0]) : null;
+  }
+
+  async findReferenceByExternal(
+    em: PostgreSqlEntityManager,
+    externalTransactionId: string,
+  ): Promise<WagerRow | null> {
+    const r = await em.execute<WagerRow[]>(
+      `SELECT id, type, status, wallet_id, player_id, round_id, game_id,
+              provider_id, external_transaction_id, amount_amount, amount_currency,
+              reference_external_transaction_id, reference, payload_hash,
+              response_payload, failure_code, processed_at, reference_attempts
+       FROM wager_transactions
+       WHERE external_transaction_id = ?
+       ORDER BY id
+       LIMIT 1
+       FOR UPDATE`,
+      [externalTransactionId],
+    );
+    return r[0] ? toWagerRow(r[0]) : null;
   }
 
   async markProcessed(
-    client: PoolClient,
+    em: PostgreSqlEntityManager,
     id: string,
     responsePayload: Record<string, unknown>,
   ): Promise<void> {
-    await client.query(
+    await em.execute(
       `UPDATE wager_transactions
-       SET status = 'PROCESSED', response_payload = $2::jsonb, processed_at = now()
-       WHERE id = $1`,
-      [id, JSON.stringify(responsePayload)],
+       SET status = 'PROCESSED', response_payload = ?::jsonb, processed_at = now()
+       WHERE id = ?`,
+      [JSON.stringify(responsePayload), id],
     );
   }
 
   async markRejected(
-    client: PoolClient,
+    em: PostgreSqlEntityManager,
     id: string,
     failureCode: string,
     responsePayload: Record<string, unknown>,
+    referenceAttempts?: number,
   ): Promise<void> {
-    await client.query(
+    await em.execute(
       `UPDATE wager_transactions
-       SET status = 'REJECTED', failure_code = $2, response_payload = $3::jsonb, processed_at = now()
-       WHERE id = $1`,
-      [id, failureCode, JSON.stringify(responsePayload)],
+       SET status = 'REJECTED', failure_code = ?, response_payload = ?::jsonb, processed_at = now()
+           , reference_attempts = COALESCE(?, reference_attempts)
+       WHERE id = ?`,
+      [failureCode, JSON.stringify(responsePayload), referenceAttempts ?? null, id],
     );
   }
 
-  /**
-   * Look up the wallet inside the same transaction, applying
-   * `FOR UPDATE` so two concurrent wagers against the same wallet
-   * serialise (one waits for the other). For LOSS — which doesn't
-   * mutate the wallet — the caller skips this and goes straight to
-   * INSERT into `wager_transactions`.
-   */
-  async lockWallet(client: PoolClient, playerId: string, currency: string): Promise<WalletRow | null> {
-    const r = await client.query<WalletRow>(
+  async setReference(
+    em: PostgreSqlEntityManager,
+    id: string,
+    referenceTransactionId: string,
+  ): Promise<void> {
+    await em.execute(
+      `UPDATE wager_transactions SET reference = ? WHERE id = ?`,
+      [referenceTransactionId, id],
+    );
+  }
+
+  async lockWallet(
+    em: PostgreSqlEntityManager,
+    walletId: string,
+    playerId: string,
+    currency: string,
+  ): Promise<WalletRow | null> {
+    const r = await em.execute<WalletRow[]>(
       `SELECT id, player_id, currency, balance_amount, balance_currency, version
        FROM wallets
-       WHERE player_id = $1 AND currency = $2
+       WHERE id = ? AND player_id = ? AND currency = ?
        FOR UPDATE`,
-      [playerId, currency],
+      [walletId, playerId, currency],
     );
-    return r.rows[0] ?? null;
+    return r[0] ?? null;
+  }
+
+  async lockWalletById(
+    em: PostgreSqlEntityManager,
+    walletId: string,
+  ): Promise<WalletRow | null> {
+    const r = await em.execute<WalletRow[]>(
+      `SELECT id, player_id, currency, balance_amount, balance_currency, version
+       FROM wallets WHERE id = ? FOR UPDATE`,
+      [walletId],
+    );
+    return r[0] ?? null;
+  }
+
+  async lockReference(
+    em: PostgreSqlEntityManager,
+    referenceId: string,
+  ): Promise<WagerRow | null> {
+    const r = await em.execute<WagerRow[]>(
+      `SELECT id, type, status, wallet_id, player_id, round_id, game_id,
+              provider_id, external_transaction_id, amount_amount, amount_currency,
+              reference_external_transaction_id, reference, payload_hash,
+              response_payload, failure_code, processed_at, reference_attempts
+       FROM wager_transactions
+       WHERE id = ?
+       FOR UPDATE`,
+      [referenceId],
+    );
+    return r[0] ? toWagerRow(r[0]) : null;
+  }
+
+  async findReversalByReferenceType(
+    em: PostgreSqlEntityManager,
+    referenceTransactionId: string,
+    type: 'REFUND' | 'ROLLBACK',
+    excludeId: string,
+  ): Promise<WagerRow | null> {
+    const r = await em.execute<WagerRow[]>(
+      `SELECT id, type, status, wallet_id, player_id, round_id, game_id,
+              provider_id, external_transaction_id, amount_amount, amount_currency,
+              reference_external_transaction_id, reference, payload_hash,
+              response_payload, failure_code, processed_at, reference_attempts
+       FROM wager_transactions
+       WHERE reference = ? AND type = ? AND id <> ?
+         AND status IN ('PENDING', 'PENDING_REFERENCE', 'PROCESSED')
+       ORDER BY created_at, id
+       LIMIT 1
+       FOR UPDATE`,
+      [referenceTransactionId, type, excludeId],
+    );
+    return r[0] ? toWagerRow(r[0]) : null;
+  }
+
+  async findPendingReferences(
+    em: PostgreSqlEntityManager,
+    maxRows: number,
+  ): Promise<WagerRow[]> {
+    const r = await em.execute<WagerRow[]>(
+      `SELECT id, type, status, wallet_id, player_id, round_id, game_id,
+              provider_id, external_transaction_id, amount_amount, amount_currency,
+              reference_external_transaction_id, reference, payload_hash,
+              response_payload, failure_code, processed_at, reference_attempts
+       FROM wager_transactions
+       WHERE status = 'PENDING_REFERENCE' AND next_retry_at <= now()
+       ORDER BY next_retry_at
+       LIMIT ?
+       FOR UPDATE SKIP LOCKED`,
+      [maxRows],
+    );
+    return r.map(toWagerRow);
+  }
+
+  async updatePendingRetry(
+    em: PostgreSqlEntityManager,
+    id: string,
+    nextRetryAt: Date,
+    attempts: number,
+  ): Promise<void> {
+    await em.execute(
+      `UPDATE wager_transactions
+       SET next_retry_at = ?, reference_attempts = ?
+       WHERE id = ?`,
+      [nextRetryAt, attempts, id],
+    );
+  }
+
+  async transitionToPendingReference(
+    em: PostgreSqlEntityManager,
+    id: string,
+    nextRetryAt: Date,
+    initialAttempt: number,
+    responsePayload: Record<string, unknown>,
+  ): Promise<void> {
+    await em.execute(
+      `UPDATE wager_transactions
+       SET status = 'PENDING_REFERENCE', next_retry_at = ?, reference_attempts = ?,
+           response_payload = ?::jsonb
+       WHERE id = ?`,
+      [nextRetryAt, initialAttempt, JSON.stringify(responsePayload), id],
+    );
   }
 
   async insertLedgerEntry(
-    client: PoolClient,
+    em: PostgreSqlEntityManager,
     input: {
       direction: 'DEBIT' | 'CREDIT';
       valueAmount: string;
@@ -154,13 +309,13 @@ export class WagerRepository {
       transactionId: string;
     },
   ): Promise<void> {
-    await client.query(
+    await em.execute(
       `INSERT INTO wallet_ledger_entries
          (direction, value_amount, value_currency,
           balance_before_amount, balance_before_currency,
           balance_after_amount, balance_after_currency,
           wallet_id, transaction_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         input.direction,
         input.valueAmount,
@@ -176,30 +331,26 @@ export class WagerRepository {
   }
 
   async applyWalletMutation(
-    client: PoolClient,
+    em: PostgreSqlEntityManager,
     walletId: string,
     newBalanceAmount: string,
   ): Promise<void> {
-    await client.query(
+    await em.execute(
       `UPDATE wallets
-       SET balance_amount = $2, version = version + 1, updated_at = now()
-       WHERE id = $1`,
-      [walletId, newBalanceAmount],
+       SET balance_amount = ?, version = version + 1, updated_at = now()
+       WHERE id = ?`,
+      [newBalanceAmount, walletId],
     );
   }
 
   async insertOutboxEvent(
-    client: PoolClient,
-    input: {
-      eventId: string;
-      eventType: string;
-      payload: Record<string, unknown>;
-    },
+    em: PostgreSqlEntityManager,
+    event: IntegrationEvent,
   ): Promise<void> {
-    await client.query(
+    await em.execute(
       `INSERT INTO outbox (event_id, event_type, schema_version, payload, status, next_attempt_at)
-       VALUES ($1, $2, 1, $3::jsonb, 'PENDING', now())`,
-      [input.eventId, input.eventType, JSON.stringify(input.payload)],
+       VALUES (?, ?, ?, ?::jsonb, 'PENDING', now())`,
+      [event.eventId, event.eventType, event.version, JSON.stringify(event.toJSON())],
     );
   }
 }
@@ -207,16 +358,22 @@ export class WagerRepository {
 export interface WagerRow {
   id: string;
   type: 'BET' | 'WIN' | 'LOSS' | 'REFUND' | 'ROLLBACK' | 'OPENING';
-  status: 'PENDING' | 'PROCESSED' | 'REJECTED' | 'FAILED';
+  status: 'PENDING' | 'PENDING_REFERENCE' | 'PROCESSED' | 'REJECTED' | 'FAILED';
   wallet_id: string;
+  player_id: string | null;
+  round_id: string | null;
+  game_id: string | null;
   provider_id: string;
   external_transaction_id: string;
   amount_amount: string;
   amount_currency: string;
+  reference_external_transaction_id: string | null;
   payload_hash: string;
   response_payload: Record<string, unknown> | null;
   failure_code: string | null;
   processed_at: Date | null;
+  reference_attempts: number;
+  reference: string | null;
 }
 
 export type WagerRowWithTimestamp = WagerRow;
@@ -230,23 +387,36 @@ export interface WalletRow {
   version: number;
 }
 
+function toWagerRow(row: WagerRow): WagerRow {
+  return {
+    ...row,
+    processed_at: row.processed_at ? new Date(row.processed_at) : null,
+  };
+}
+
 /** Build a canonical payload hash from the business fields only (no transport metadata). */
 export function wagerPayloadHash(input: {
-  type: string;
-  amount: MoneyProps;
+  kind: string;
+  money: MoneyProps;
   playerId: string;
-  currency: string;
+  walletId: string;
+  roundId: string;
+  gameId: string;
   externalTransactionId: string;
   providerId: string;
-  reference?: string;
+  referenceExternalTransactionId?: string | undefined;
 }): string {
   return payloadHash({
-    type: input.type,
-    amount: input.amount,
+    kind: input.kind,
     playerId: input.playerId,
-    currency: input.currency,
+    walletId: input.walletId,
+    roundId: input.roundId,
+    gameId: input.gameId,
     externalTransactionId: input.externalTransactionId,
     providerId: input.providerId,
-    ...(input.reference !== undefined ? { reference: input.reference } : {}),
+    money: input.money,
+    ...(input.referenceExternalTransactionId !== undefined
+      ? { referenceExternalTransactionId: input.referenceExternalTransactionId }
+      : {}),
   });
 }

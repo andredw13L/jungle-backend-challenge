@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { Money } from '../money';
 import { WalletBalanceChanged } from './wallet-balance-changed';
 import { WagerTransactionProcessed } from './wager-transaction-processed';
+import { WagerTransactionPendingReference } from './wager-transaction-pending-reference';
 
 describe('IntegrationEvent envelope', () => {
   test('WalletBalanceChanged serialises with ISO-8601 date and decimal Money', () => {
@@ -50,6 +51,30 @@ describe('IntegrationEvent envelope', () => {
     expect(json['schemaVersion']).toBe(1);
     expect(json['failureCode']).toBe('INSUFFICIENT_FUNDS');
     expect(json['correlationId']).toBeUndefined();
+  });
+
+  test('pending reference uses its own typed event and preserves the public reference', () => {
+    const ev = new WagerTransactionPendingReference(
+      'evt-pending',
+      new Date('2026-01-01T00:00:00.000Z'),
+      undefined,
+      {
+        wagerTransactionId: 'tx-pending',
+        walletId: 'w-1',
+        type: 'REFUND',
+        status: 'PENDING_REFERENCE',
+        amount: { amount: '10.00', currency: 'BRL' },
+        referenceExternalTransactionId: 'bet-external-1',
+      },
+    );
+    expect(ev.toJSON()).toMatchObject({
+      eventType: 'WagerTransactionPendingReference',
+      aggregateId: 'tx-pending',
+      data: {
+        status: 'PENDING_REFERENCE',
+        referenceExternalTransactionId: 'bet-external-1',
+      },
+    });
   });
 
   test('envelope is frozen — no mutation after construction', () => {

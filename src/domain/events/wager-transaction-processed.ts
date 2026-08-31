@@ -5,9 +5,10 @@ export interface WagerTransactionProcessedPayload {
   wagerTransactionId: string;
   walletId: string;
   type: WagerType;
-  status: WagerStatus;
+  status: WagerStatus | 'PENDING_REFERENCE';
   amount: { amount: string; currency: string };
-  reference?: string;
+  referenceExternalTransactionId?: string;
+  referenceTransactionId?: string;
   failureCode?: string;
 }
 
@@ -16,9 +17,9 @@ export interface WagerTransactionProcessedPayload {
  * terminal state. LOSS/REJECTED wagers still emit this; the
  * WalletBalanceChanged event is emitted only when a balance actually moved.
  */
-export class WagerTransactionProcessed extends IntegrationEvent {
+export class WagerTransactionProcessed extends IntegrationEvent<WagerTransactionProcessedPayload> {
   readonly eventType = 'WagerTransactionProcessed' as const;
-  readonly schemaVersion = 1 as const;
+  readonly version = 1 as const;
 
   constructor(
     eventId: string,
@@ -26,11 +27,11 @@ export class WagerTransactionProcessed extends IntegrationEvent {
     correlationId: string | undefined,
     public readonly payload: WagerTransactionProcessedPayload,
   ) {
-    super(eventId, occurredAt, correlationId);
+    super(eventId, occurredAt, correlationId, payload.wagerTransactionId, payload);
     Object.freeze(this);
   }
 
   toJSON(): Record<string, unknown> {
-    return { ...this.envelope(), ...this.payload };
+    return super.toJSON();
   }
 }

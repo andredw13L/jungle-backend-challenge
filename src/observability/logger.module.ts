@@ -11,6 +11,18 @@ import { MetricsService } from './metrics.service';
  */
 const env = loadEnv();
 
+export function serializeHttpRequest(request: {
+  id?: string;
+  method?: string;
+  url?: string;
+}): { id?: string; method?: string; url?: string } {
+  return {
+    ...(request.id === undefined ? {} : { id: request.id }),
+    ...(request.method === undefined ? {} : { method: request.method }),
+    ...(request.url === undefined ? {} : { url: request.url }),
+  };
+}
+
 @Global()
 @Module({
   imports: [
@@ -25,6 +37,7 @@ const env = loadEnv();
           if (res.statusCode >= 400) return 'warn';
           return 'info';
         },
+        serializers: { req: serializeHttpRequest },
       },
     }),
   ],
