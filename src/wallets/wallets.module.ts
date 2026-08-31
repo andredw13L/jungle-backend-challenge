@@ -5,6 +5,7 @@ import { loadEnv } from '../config/env';
 import { WalletRepository } from '../infrastructure/database/wallet.repository';
 import { WalletCreationService } from './wallet-creation.service';
 import { WalletsController } from './wallets.controller';
+import { LedgerRepository } from './ledger.repository';
 
 @Module({
   controllers: [WalletsController],
@@ -14,8 +15,9 @@ import { WalletsController } from './wallets.controller';
       useFactory: () => makePool(loadEnv()),
     },
     WalletRepository,
+    LedgerRepository,
     WalletCreationService,
   ],
-  exports: [POOL, WalletRepository, WalletCreationService],
+  exports: [POOL, WalletRepository, LedgerRepository, WalletCreationService],
 })
 export class WalletsModule {}

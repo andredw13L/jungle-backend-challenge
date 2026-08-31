@@ -165,11 +165,11 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 
 **Depende de:** grupo 3.
 
-- [ ] 4.1 [Paginar o Ledger imutável] Escrever testes do cursor Base64URL `{createdAt,id}`, ordenação estável, limite padrão 50, máximo 100 e cursor inválido.
-- [ ] 4.2 [Paginar o Ledger imutável] Implementar `GET /wallets/:id/ledger` com paginação por chave e sem alterar entradas históricas.
-- [ ] 4.3 [Reconciliar Wallet e Ledger] Escrever testes para saldo reconciliado, divergência exata e ausência de autocorreção.
-- [ ] 4.4 [Reconciliar Wallet e Ledger; Emitir logs estruturados e seguros] Implementar o endpoint de reconciliação, log estruturado e métrica da divergência sem dados sensíveis.
-- [ ] 4.5 Executar os testes e consultar diretamente as tabelas para provar a invariante; o Supervisor aprova e o Coordenador faz o preflight Git e o commit.
+- [x] 4.1 [Paginar o Ledger imutável] Escrever testes do cursor Base64URL `{createdAt,id}`, ordenação estável, limite padrão 50, máximo 100 e cursor inválido.
+- [x] 4.2 [Paginar o Ledger imutável] Implementar `GET /wallets/:id/ledger` com paginação por chave e sem alterar entradas históricas.
+- [x] 4.3 [Reconciliar Wallet e Ledger] Escrever testes para saldo reconciliado, divergência exata e ausência de autocorreção.
+- [x] 4.4 [Reconciliar Wallet e Ledger; Emitir logs estruturados e seguros] Implementar o endpoint de reconciliação, log estruturado e métrica da divergência sem dados sensíveis.
+- [x] 4.5 Executar os testes e consultar diretamente as tabelas para provar a invariante; o Supervisor aprova e o Coordenador faz o preflight Git e o commit.
 
 ## 5. BET, WIN, LOSS e idempotência compartilhada
 
