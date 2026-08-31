@@ -16,8 +16,8 @@ describe('Wallet', () => {
     });
     expect(wallet.snapshot.version).toBe(1);
     expect(wallet.snapshot.balance.amount).toBe('50.00');
-    expect(opening.props.direction).toBe('CREDIT');
-    expect(opening.props.balanceAfter.amount).toBe('50.00');
+    expect(opening!.props.direction).toBe('CREDIT');
+    expect(opening!.props.balanceAfter.amount).toBe('50.00');
   });
 
   test('successful debit: 100 - 80 -> 20, version increments by 1', () => {

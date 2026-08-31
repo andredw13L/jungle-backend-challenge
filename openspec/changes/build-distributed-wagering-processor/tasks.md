@@ -154,12 +154,12 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 
 **Depende de:** grupos 1 e 2.
 
-- [ ] 3.1 [Criar Wallet atomicamente] Escrever testes de integração para migration `up/down`, nomes de constraints, precisão `NUMERIC(18,2)`, versão inicial e imutabilidade do Ledger.
-- [ ] 3.2 [Criar Wallet atomicamente] Criar uma migration com as cinco tabelas, constraints, índices e triggers definidos no design; evidência: ciclo `up -> down -> up` em banco limpo.
-- [ ] 3.3 [Money exato e imutável] Mapear entidades MikroORM preservando valores monetários como strings decimais na ida e na volta; evidência: teste de round-trip exato.
-- [ ] 3.4 [Criar Wallet atomicamente] Implementar criação atômica de Wallet, Ledger de abertura e evento Outbox na mesma transação.
-- [ ] 3.5 [Criar Wallet atomicamente; Consultar Wallet] Expor `POST /wallets` e `GET /wallets/:id` com os códigos 201, 404 e 409 definidos no design.
-- [ ] 3.6 Executar testes de atomicidade, duplicidade, constraints e round-trip; o Supervisor aprova o diff e o Coordenador confere `andredw13L` antes do commit.
+- [x] 3.1 [Criar Wallet atomicamente] Escrever testes de integração para migration `up/down`, nomes de constraints, precisão `NUMERIC(18,2)`, versão inicial e imutabilidade do Ledger.
+- [x] 3.2 [Criar Wallet atomicamente] Criar uma migration com as cinco tabelas, constraints, índices e triggers definidos no design; evidência: ciclo `up -> down -> up` em banco limpo.
+- [x] 3.3 [Money exato e imutável] Mapear entidades MikroORM preservando valores monetários como strings decimais na ida e na volta; evidência: teste de round-trip exato.
+- [x] 3.4 [Criar Wallet atomicamente] Implementar criação atômica de Wallet, Ledger de abertura e evento Outbox na mesma transação.
+- [x] 3.5 [Criar Wallet atomicamente; Consultar Wallet] Expor `POST /wallets` e `GET /wallets/:id` com os códigos 201, 404 e 409 definidos no design.
+- [x] 3.6 Executar testes de atomicidade, duplicidade, constraints e round-trip; o Supervisor aprova o diff e o Coordenador confere `andredw13L` antes do commit.
 
 ## 4. Ledger paginado e reconciliação
 

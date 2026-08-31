@@ -6,6 +6,14 @@ import {
 import { LedgerEntry } from './ledger-entry';
 import { Money } from './money';
 
+/**
+ * Wallet.open() now returns `opening: LedgerEntry | null` — a zero initial
+ * balance produces no OPENING transaction and no Ledger entry, per the
+ * wallet-lifecycle spec ("Saldo inicial zero" scenario).
+ *
+ * The persistence layer (slice 3) checks `opening` and persists the entry
+ * only when non-null.
+ */
 export interface WalletSnapshot {
   id: string;
   playerId: string;
@@ -16,32 +24,38 @@ export interface WalletSnapshot {
   updatedAt: Date;
 }
 
-/**
- * Wallet — aggregate that owns the balance. Invariants:
- *
- * - One Wallet per `(playerId, currency)`.
- * - `version` starts at 1 and increments only when the balance changes.
- * - The balance is NEVER negative.
- * - `rehydrate` trusts persisted state; `apply` enforces invariants.
- *
- * Per spec: LOSS/REJECTED do NOT touch the Wallet — only `debit` and `credit`
- * mutate the balance. `rehydrate` exists for the persistence layer (slice 3).
- */
+export interface OpenResult {
+  wallet: Wallet;
+  opening: LedgerEntry | null;
+}
+
 export class Wallet {
   private constructor(public readonly snapshot: WalletSnapshot) {}
 
-  /**
-   * Open a new wallet with an initial balance. Returns the wallet and the
-   * opening ledger entry that records the balance change in a single
-   * transaction (slice 3 wires this to the persistence layer).
-   */
   static open(props: {
     id: string;
     playerId: string;
     currency: string;
     initialBalance: Money;
     openedAt: Date;
-  }): { wallet: Wallet; opening: LedgerEntry } {
+  }): OpenResult {
+    if (props.initialBalance.isZero()) {
+      const wallet = new Wallet(
+        Object.freeze({
+          id: props.id,
+          playerId: props.playerId,
+          currency: props.currency,
+          balance: props.initialBalance,
+          version: 1,
+          createdAt: props.openedAt,
+          updatedAt: props.openedAt,
+        }),
+      );
+      return {
+        wallet: Object.freeze(wallet) as Wallet,
+        opening: null,
+      };
+    }
     const opening = LedgerEntry.record({
       direction: 'CREDIT',
       value: props.initialBalance,
@@ -71,11 +85,11 @@ export class Wallet {
     return Object.freeze(new Wallet(Object.freeze({ ...props }))) as Wallet;
   }
 
-  debit(value: Money, transactionId: string, at: Date): ApplyResult {
+  debit(value: Money, transactionId: string, at: Date) {
     return this.apply('DEBIT', value, transactionId, at);
   }
 
-  credit(value: Money, transactionId: string, at: Date): ApplyResult {
+  credit(value: Money, transactionId: string, at: Date) {
     return this.apply('CREDIT', value, transactionId, at);
   }
 
@@ -84,13 +98,11 @@ export class Wallet {
     value: Money,
     transactionId: string,
     at: Date,
-  ): ApplyResult {
+  ) {
     if (value.currency !== this.snapshot.currency) {
       throw new CurrencyMismatchError(this.snapshot.currency, value.currency);
     }
-    // ponytail: check the candidate on Decimal so we can raise the domain-
-    // specific INSUFFICIENT_FUNDS instead of leaking InvalidMoneyError from
-    // Money.create.
+    // Decimal-based negative check (see ledger-entry.ts comment).
     const candidate =
       direction === 'DEBIT'
         ? new Decimal(this.snapshot.balance.amount).minus(value.amount)
@@ -120,9 +132,4 @@ export class Wallet {
       entry,
     };
   }
-}
-
-interface ApplyResult {
-  wallet: Wallet;
-  entry: LedgerEntry;
 }
