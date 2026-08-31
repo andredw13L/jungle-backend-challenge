@@ -6,7 +6,7 @@
 
 As duas opções abaixo executam a mesma lista de tarefas e aplicam os mesmos gates. Muda apenas o provedor e o nome de cada papel.
 
-### Perfil A — Codex
+### Perfil A: Codex
 
 Este perfil segue a configuração documentada pela OpenAI em [Custom subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents): modelo, esforço de raciocínio, permissões e responsabilidade serão definidos por papel.
 
@@ -14,10 +14,10 @@ Este perfil segue a configuração documentada pela OpenAI em [Custom subagents]
 APROVAÇÃO EXPLÍCITA DO USUÁRIO
               |
               v
-Raiz — integra, verifica identidade Git, commita e publica
+Raiz: integra, verifica identidade Git, commita e publica
               |
               v
-Terra supervisor — gpt-5.6-terra / xhigh / somente leitura
+Terra supervisor: gpt-5.6-terra / xhigh / somente leitura
               |
        define contrato e arquivos
               |
@@ -40,7 +40,7 @@ Terra revisa requisito + diff + testes
                     Raiz integra e verifica
 ```
 
-### Perfil B — OpenCode Go
+### Perfil B: OpenCode Go
 
 Este perfil usa o mapeamento publicado em [OpenCode Go Preset](https://github.com/alvinunreal/oh-my-opencode-slim/blob/master/docs/opencode-go-preset.md) e espelha o caminho crítico do Codex.
 
@@ -48,11 +48,11 @@ Este perfil usa o mapeamento publicado em [OpenCode Go Preset](https://github.co
 APROVAÇÃO EXPLÍCITA DO USUÁRIO
               |
               v
-Orchestrator — minimax-m3 / thinking
+Orchestrator: minimax-m3 / thinking
 integra, verifica identidade Git, commita e publica
               |
               v
-Oracle supervisor — qwen3.7-max / max / somente leitura
+Oracle supervisor: qwen3.7-max / max / somente leitura
               |
        define contrato e arquivos
               |
@@ -76,7 +76,7 @@ Oracle revisa requisito + diff + testes
 
 Explorer e Librarian (`deepseek-v4-flash/high`) podem investigar em paralelo e somente em leitura. Designer (`kimi-k2.7-code`) participa apenas de decisões de design; Observer (`mimo-v2.5`) participa apenas quando houver material visual. Eles não substituem Oracle no gate nem Fixer na implementação.
 
-### Início ou retomada — regra compartilhada
+### Início ou retomada: regra compartilhada
 
 ```text
 Selecionar um perfil para a sessão

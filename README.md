@@ -1,12 +1,12 @@
-# Technical Challenge — Distributed Wagering Processor
+# Technical Challenge: Distributed Wagering Processor
 
 ## Bem-vindo à Jungle Gaming 🦧
 
-A **Jungle Gaming** é uma software house especializada em iGaming — desenvolvemos plataformas de cassino online com tecnologia de ponta: NestJS, Bun, TanStack, DDD e arquitetura orientada a eventos. Somos apaixonados por engenharia de software e acreditamos que grandes produtos nascem de grandes times.
+A **Jungle Gaming** é uma software house especializada em iGaming: desenvolvemos plataformas de cassino online com tecnologia de ponta: NestJS, Bun, TanStack, DDD e arquitetura orientada a eventos. Somos apaixonados por engenharia de software e acreditamos que grandes produtos nascem de grandes times.
 
 Este desafio é a porta de entrada para fazer parte desse time. Ele foi desenhado para refletir problemas reais do nosso dia a dia: sistemas distribuídos, tempo real, precisão monetária, experiência de usuário e arquitetura bem pensada.
 
-Não esperamos perfeição — esperamos raciocínio claro, código limpo e decisões justificadas. Mostre como você pensa e como você constrói.
+Não esperamos perfeição: esperamos raciocínio claro, código limpo e decisões justificadas. Mostre como você pensa e como você constrói.
 
 ---
 
@@ -27,9 +27,9 @@ O sistema deve permanecer correto quando mensagens forem **duplicadas**, entregu
 
 ---
 
-## 2. Autenticação — a cargo do candidato
+## 2. Autenticação: a cargo do candidato
 
-Esta seção vem antes do resto justamente para você dimensionar o timebox: **autenticação não vale pontos** na tabela de avaliação (seção 14) e não deve competir com correção financeira, concorrência e idempotência. O desafio **não prescreve** um mecanismo — a escolha, o desenho e a implementação são de sua responsabilidade, e serão discutidos na apresentação.
+Esta seção vem antes do resto justamente para você dimensionar o timebox: **autenticação não vale pontos** na tabela de avaliação (seção 14) e não deve competir com correção financeira, concorrência e idempotência. O desafio **não prescreve** um mecanismo: a escolha, o desenho e a implementação são de sua responsabilidade, e serão discutidos na apresentação.
 
 Se você implementar, a expectativa é **integrar um Identity Provider externo**, não escrever autenticação artesanal. Nada de tabela própria de usuários com hash de senha. Sugestões que sobem bem em Docker Compose:
 
@@ -37,7 +37,7 @@ Se você implementar, a expectativa é **integrar um Identity Provider externo**
 
 Se você optar por **não** implementar, isso é aceito: documente a decisão no `ARCHITECTURE.md`, descreva o desenho que adotaria e deixe o ponto de extensão explícito no código (por exemplo um `AuthGuard` no-op ou um `ProviderIdentityPort`).
 
-Escopo do que a autenticação **não** cobre neste desafio: os endpoints de health ficam abertos, e mensagens vindas da fila são tratadas como canal interno confiável — mas a identidade do provedor contida na mensagem continua sujeita às mesmas validações de domínio.
+Escopo do que a autenticação **não** cobre neste desafio: os endpoints de health ficam abertos, e mensagens vindas da fila são tratadas como canal interno confiável. A identidade do provedor contida na mensagem continua sujeita às mesmas validações de domínio.
 
 ---
 
@@ -80,8 +80,8 @@ A entrega é **at-least-once**. Portanto assuma que:
 
 Use **uma** das opções:
 
-- **MikroORM — preferencial** (Unit of Work e Identity Map explícitos, `EntityManager.transactional()`, `LockMode`);
-- **TypeORM** — aceito.
+- **MikroORM: preferencial** (Unit of Work e Identity Map explícitos, `EntityManager.transactional()`, `LockMode`);
+- **TypeORM**: aceito.
 
 **Prisma e outros ORMs estão fora do escopo.** A escolha, o mapeamento do `Money` e a estratégia transacional adotada devem ser justificados em `ARCHITECTURE.md`.
 
@@ -106,14 +106,14 @@ Nomes e assinaturas podem ser adaptados, desde que as garantias sejam preservada
 ### 6.0 Regra de modelagem
 
 - Construtor `private` ou `protected` + **factories estáticas** (`create`, `from`, `rehydrate`);
-- a reidratação a partir do banco usa a factory `rehydrate`, que **não** revalida regras de transição — apenas reconstrói estado já persistido.
+- a reidratação a partir do banco usa a factory `rehydrate`, que **não** revalida regras de transição: apenas reconstrói estado já persistido.
 
 Os blocos abaixo são **esqueletos de referência**: o que importa é que o estado seja encapsulado e as transições sejam explícitas.
 
 ### 6.1 Money
 
 ```ts
-// DTO — interface é adequada aqui
+// DTO: interface é adequada aqui
 interface MoneyProps {
   amount: string;   // decimal string, ex.: "25.00"
   currency: string; // ISO-4217
@@ -183,7 +183,7 @@ class Wallet {
     initialBalance: Money;
   }): Wallet;
 
-  /** Reconstrução a partir da persistência — não revalida transições. */
+  /** Reconstrução a partir da persistência: não revalida transições. */
   static rehydrate(state: WalletState): Wallet;
 
   get balance(): Money { return this._balance; }
@@ -243,7 +243,7 @@ class WagerTransaction {
     public readonly gameId: string,
     public readonly kind: WagerTransactionKind,
     public readonly money: Money,
-    /** id no provedor — não o id interno */
+    /** id no provedor: não o id interno */
     public readonly referenceExternalTransactionId: string | undefined,
     public readonly createdAt: Date,
     private _status: WagerTransactionStatus,
@@ -306,7 +306,7 @@ class WalletLedgerEntry {
 }
 ```
 
-**Sem campos mutáveis e sem métodos de transição** — a imutabilidade é estrutural, não uma convenção. `create` valida a aritmética do lançamento.
+**Sem campos mutáveis e sem métodos de transição**: a imutabilidade é estrutural, não uma convenção. `create` valida a aritmética do lançamento.
 
 - Uma transação financeira produz **no máximo um lançamento por wallet**.
 - Operações sem efeito no saldo (`LOSS`, e qualquer transação `REJECTED`) **não geram lançamento**.
@@ -384,7 +384,7 @@ Regras adicionais:
 6. Transação `REJECTED` não altera saldo nem gera ledger.
 7. Repetir uma operação já processada retorna **o resultado original**, incluindo o saldo observado naquele momento.
 8. Referência ausente → persistir como `PENDING_REFERENCE` e reprocessar depois (ver 7.1).
-9. Reversão que produziria saldo negativo é **rejeitada explicitamente**, com um `failureCode` distinto do de uma aposta sem saldo — são situações operacionalmente diferentes — e permanece auditável.
+9. Reversão que produziria saldo negativo é **rejeitada explicitamente**, com um `failureCode` distinto do de uma aposta sem saldo. São situações operacionalmente diferentes e a rejeição permanece auditável.
 
 Qualquer interpretação adicional adotada deve ser documentada.
 
@@ -396,7 +396,7 @@ Qualquer interpretação adicional adotada deve ser documentada.
 
 ### 7.2 Códigos de falha
 
-Toda rejeição precisa carregar um `failureCode` estável e legível por máquina, suficiente para o provedor decidir se reenvia, corrige o payload ou desiste. A taxonomia é sua — defina-a e documente-a.
+Toda rejeição precisa carregar um `failureCode` estável e legível por máquina, suficiente para o provedor decidir se reenvia, corrige o payload ou desiste. A taxonomia é sua: defina-a e documente-a.
 
 ---
 
@@ -411,7 +411,7 @@ A solução deve manter a correção quando:
 - wallets diferentes são processadas em paralelo;
 - **três ou mais instâncias** rodam simultaneamente.
 
-A estratégia é sua escolha — pessimistic locking, optimistic locking com retry limitado, update atômico condicionado ou uma combinação — e deve ser justificada em `ARCHITECTURE.md`.
+A estratégia é sua escolha, entre pessimistic locking, optimistic locking com retry limitado, update atômico condicionado ou uma combinação, e deve ser justificada em `ARCHITECTURE.md`.
 
 Recursos de ordenação e deduplicação do broker são **otimização**, não a garantia final: o banco continua responsável pelas invariantes.
 
@@ -501,11 +501,11 @@ Idempotency-Key: provider-a:transaction-123
 
 - o header `Idempotency-Key` é obrigatório e é a fonte da verdade;
 - default recomendado: `"{providerId}:{externalTransactionId}"`;
-- `payloadHash` = hash de um **JSON canônico** (chaves ordenadas) do subconjunto de campos de negócio — o header e metadados de transporte não entram no hash. O algoritmo deve estar documentado;
+- `payloadHash` = hash de um **JSON canônico** (chaves ordenadas) do subconjunto de campos de negócio: o header e metadados de transporte não entram no hash. O algoritmo deve estar documentado;
 - requisição idêntica → mesma resposta, `idempotentReplay: true`;
 - mesma key com payload diferente → conflito, e **não** replay.
 
-**Status HTTP:** o mapeamento é decisão sua, mas a API precisa distinguir com clareza — e de forma consistente entre todos os endpoints — payload inválido, conflito de idempotência, rejeição por regra de negócio, aceite com processamento pendente e falha transitória de infraestrutura. Colapsar essas situações em um mesmo código obriga o provedor a interpretar mensagem de erro para decidir se pode reenviar.
+**Status HTTP:** o mapeamento é decisão sua, mas a API precisa distinguir com clareza e de forma consistente entre todos os endpoints: payload inválido, conflito de idempotência, rejeição por regra de negócio, aceite com processamento pendente e falha transitória de infraestrutura. Colapsar essas situações em um mesmo código obriga o provedor a interpretar mensagem de erro para decidir se pode reenviar.
 
 ### Reconciliação
 
@@ -602,7 +602,7 @@ Cenário que precisa funcionar:
 | `WalletBalanceChanged` | **somente** quando o saldo muda |
 | `WagerTransactionPendingReference` | referência ausente |
 
-Envelope — **classe abstrata**, com uma subclasse concreta por evento:
+Envelope: **classe abstrata**, com uma subclasse concreta por evento:
 
 ```ts
 interface IntegrationEventProps<T> {
@@ -641,7 +641,7 @@ abstract class IntegrationEvent<T> {
 }
 ```
 
-Exemplo de subclasse — o `eventType` e a `version` ficam **no tipo**, não em uma string solta no call site:
+Exemplo de subclasse: o `eventType` e a `version` ficam **no tipo**, não em uma string solta no call site:
 
 ```ts
 interface WalletBalanceChangedData {
@@ -662,7 +662,7 @@ class WalletBalanceChanged extends IntegrationEvent<WalletBalanceChangedData> {
 }
 ```
 
-`data` carrega `MoneyProps` (string decimal), nunca a instância de `Money` — o payload precisa ser JSON estável e versionável.
+`data` carrega `MoneyProps` (string decimal), nunca a instância de `Money`: o payload precisa ser JSON estável e versionável.
 
 ---
 
@@ -717,7 +717,7 @@ wallet.balance == saldo reconstruído pelo ledger
 
 ---
 
-## 14. Avaliação — 100 pontos
+## 14. Avaliação: 100 pontos
 
 | Área | Pontos | O que será observado |
 |---|---|---|
@@ -743,4 +743,4 @@ wallet.balance == saldo reconstruído pelo ledger
 
 ### Diferenciais opcionais
 
-Teste de carga também conta como diferencial. Se fizer, exponha como `bun run test:load` e registre ambiente, metodologia, throughput, p50/p95/p99, taxa de erro, conflitos de concorrência e outbox lag. Não há meta de RPS — a qualidade do experimento e a honestidade da análise pesam mais que o número bruto.
+Teste de carga também conta como diferencial. Se fizer, exponha como `bun run test:load` e registre ambiente, metodologia, throughput, p50/p95/p99, taxa de erro, conflitos de concorrência e outbox lag. Não há meta de RPS: a qualidade do experimento e a honestidade da análise pesam mais que o número bruto.
