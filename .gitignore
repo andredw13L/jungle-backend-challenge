@@ -1,1 +1,26 @@
+# runtime / build artifacts
+node_modules/
+dist/
+.bun/
+
+# stray tsc output next to source roots (e.g. scripts/*.js from a misconfigured build)
+**/*.js.map
+scripts/**/*.js
+tests/**/*.js
+
+# env files (never commit secrets)
+.env
+.env.local
+.env.*.local
+
+# test artefacts
+coverage/
+.nyc_output/
+*.log
+
+# editor / OS noise
+.DS_Store
+.vscode/
+.idea/
+
 GLOSSARY.md

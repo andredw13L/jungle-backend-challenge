@@ -133,12 +133,12 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 
 **Depende de:** aprovação explícita do usuário.
 
-- [ ] 1.1 [OpenAI Custom subagents; OpenCode Go Preset] Selecionar um único perfil para a sessão e preparar somente seus papéis: `terra-supervisor`/`luna-executor` em `xhigh` no Codex, ou Orchestrator/Oracle/Fixer do preset `opencode-go` sem `--reset`; evidência: perfil ativo e agentes esperados respondendo sem iniciar a implementação.
-- [ ] 1.2 [Executar com Bun e Docker Compose] Inicializar o workspace Bun, TypeScript estrito e os três processos NestJS nas portas 3101–3103 com uma única base de código; evidência: build e três processos respondendo localmente.
-- [ ] 1.3 [Validar configuração do ambiente de execução; Manter a autenticação externa] Validar variáveis na inicialização e fornecer somente o `ProviderIdentityPort` com guard sem autenticação real; evidência: teste de configuração válida e falha imediata para variável ausente ou inválida.
-- [ ] 1.4 [Executar com Bun e Docker Compose] Subir PostgreSQL 18 e LocalStack 3.8.1 no Compose e criar `wager-transactions.fifo`, sua DLQ e `wager-events.fifo`; usar `uuidv7()` nativo para IDs internos; evidência: script de prontidão confirma as três filas e a conexão com o banco.
-- [ ] 1.5 [Separar disponibilidade do processo e prontidão] Implementar liveness local e readiness de PostgreSQL + SQS; evidência: testes mostram liveness saudável com dependência indisponível e readiness degradada.
-- [ ] 1.6 Executar instalação limpa, typecheck, build e testes da fatia; o Supervisor registra `APROVADO`, então o Coordenador confere a identidade `andredw13L` e cria o commit da fatia.
+- [x] 1.1 [OpenAI Custom subagents; OpenCode Go Preset] Selecionar um único perfil para a sessão e preparar somente seus papéis: `terra-supervisor`/`luna-executor` em `xhigh` no Codex, ou Orchestrator/Oracle/Fixer do preset `opencode-go` sem `--reset`; evidência: perfil ativo e agentes esperados respondendo sem iniciar a implementação.
+- [x] 1.2 [Executar com Bun e Docker Compose] Inicializar o workspace Bun, TypeScript estrito e os três processos NestJS nas portas 3101–3103 com uma única base de código; evidência: build e três processos respondendo localmente.
+- [x] 1.3 [Validar configuração do ambiente de execução; Manter a autenticação externa] Validar variáveis na inicialização e fornecer somente o `ProviderIdentityPort` com guard sem autenticação real; evidência: teste de configuração válida e falha imediata para variável ausente ou inválida.
+- [x] 1.4 [Executar com Bun e Docker Compose] Subir PostgreSQL 18 e LocalStack 3.8.1 no Compose e criar `wager-transactions.fifo`, sua DLQ e `wager-events.fifo`; usar `uuidv7()` nativo para IDs internos; evidência: script de prontidão confirma as três filas e a conexão com o banco.
+- [x] 1.5 [Separar disponibilidade do processo e prontidão] Implementar liveness local e readiness de PostgreSQL + SQS; evidência: testes mostram liveness saudável com dependência indisponível e readiness degradada.
+- [x] 1.6 Executar instalação limpa, typecheck, build e testes da fatia; o Supervisor registra `APROVADO`, então o Coordenador confere a identidade `andredw13L` e cria o commit da fatia.
 
 ## 2. Domínio financeiro puro
 

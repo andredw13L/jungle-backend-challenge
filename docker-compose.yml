@@ -1,0 +1,47 @@
+name: wagering-local
+
+# Fixed PostgreSQL 18 image — slice 1 just needs the engine. Migrations land
+# in slice 3; uuidv7() is verified by the readiness script.
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: wagering-postgres
+    environment:
+      POSTGRES_USER: wagering
+      POSTGRES_PASSWORD: wagering
+      POSTGRES_DB: wagering
+      # PostgreSQL 18 stores data in a versioned subdirectory; mounting the
+      # whole parent lets the image decide where to land it.
+      PGDATA: /var/lib/postgresql/18/docker
+    ports:
+      - "5544:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wagering -d wagering"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres-data:/var/lib/postgresql
+
+  # LocalStack 3.8.1 is pinned — see design §Riscos.
+  localstack:
+    image: localstack/localstack:3.8.1
+    container_name: wagering-localstack
+    environment:
+      SERVICES: sqs
+      DEBUG: "0"
+      AWS_DEFAULT_REGION: us-east-1
+      EAGER_SERVICE_LOADING: "1"
+    ports:
+      - "4566:4566"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - localstack-data:/var/lib/localstack
+
+volumes:
+  postgres-data:
+  localstack-data:
