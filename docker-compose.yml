@@ -1,7 +1,8 @@
 name: wagering-local
 
-# Fixed PostgreSQL 18 image — slice 1 just needs the engine. Migrations land
-# in slice 3; uuidv7() is verified by the readiness script.
+# Full local stack (slice 10). `docker compose up` from a clean clone builds
+# the image, migrates the schema, provisions the SQS queues and boots three
+# application instances on 3101–3103 sharing one PostgreSQL and LocalStack.
 services:
   postgres:
     image: postgres:18-alpine
@@ -41,6 +42,70 @@ services:
       retries: 20
     volumes:
       - localstack-data:/var/lib/localstack
+
+  # One-shot schema migration — the app instances start only after it exits 0.
+  migrate:
+    build: .
+    command: ["bun", "scripts/migrate.ts", "up"]
+    env_file: [.env.example]
+    environment:
+      DATABASE_URL: postgres://wagering:wagering@postgres:5432/wagering
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # One-shot idempotent provisioning of the three FIFO queues (readiness
+  # script also proves uuidv7() on the engine). Runs after migrate so a
+  # failed schema never masks a failed broker setup.
+  queues:
+    build: .
+    command: ["bun", "scripts/readiness.ts"]
+    env_file: [.env.example]
+    environment:
+      DATABASE_URL: postgres://wagering:wagering@postgres:5432/wagering
+      AWS_ENDPOINT_URL: http://localstack:4566
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # The three application instances required by the README (§10). Same image,
+  # same codebase; only PORT differs. All broker/DB traffic stays on the
+  # compose network via the two overrides below.
+  app-1: &app
+    build: .
+    env_file: [.env.example]
+    environment:
+      DATABASE_URL: postgres://wagering:wagering@postgres:5432/wagering
+      AWS_ENDPOINT_URL: http://localstack:4566
+      PORT: "3101"
+    ports:
+      - "3101:3101"
+    depends_on:
+      queues:
+        condition: service_completed_successfully
+    restart: unless-stopped
+  app-2:
+    <<: *app
+    environment:
+      DATABASE_URL: postgres://wagering:wagering@postgres:5432/wagering
+      AWS_ENDPOINT_URL: http://localstack:4566
+      PORT: "3102"
+    ports:
+      - "3102:3102"
+  app-3:
+    <<: *app
+    environment:
+      DATABASE_URL: postgres://wagering:wagering@postgres:5432/wagering
+      AWS_ENDPOINT_URL: http://localstack:4566
+      PORT: "3103"
+    ports:
+      - "3103:3103"
 
 volumes:
   postgres-data:

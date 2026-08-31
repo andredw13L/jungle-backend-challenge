@@ -229,9 +229,9 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 
 **Depende de:** grupos 1–9.
 
-- [ ] 10.1 [Executar com Bun e Docker Compose] Finalizar Dockerfile e Compose para construir e iniciar toda a solução a partir de clone limpo com os comandos documentados.
-- [ ] 10.2 Atualizar README e ARCHITECTURE com setup, decisões, endpoints, filas, processos, invariantes, riscos e comandos reais de verificação, sem material de estudo pessoal.
-- [ ] 10.3 Executar migration `up -> down -> up`, typecheck, build e todas as suítes unitárias, integração LocalStack/PostgreSQL e distribuídas em ambiente limpo.
-- [ ] 10.4 Conferir requisito por requisito do README e dos seis specs, anexando a cada item o teste ou comando que o prova; qualquer lacuna volta ao grupo responsável.
-- [ ] 10.5 Manter ledger de partidas dobradas, OpenTelemetry, dashboard e teste de carga fora desta mudança; incluir teste de carga somente mediante aprovação separada depois de todos os requisitos obrigatórios verdes.
-- [ ] 10.6 O Supervisor realiza a revisão final de spec, diff e evidências; após `APROVADO`, o Coordenador confere `andredw13L`, cria o commit final e só publica se essa ação continuar autorizada.
+- [x] 10.1 [Executar com Bun e Docker Compose] Finalizar Dockerfile e Compose para construir e iniciar toda a solução a partir de clone limpo com os comandos documentados.
+- [x] 10.2 Atualizar README e ARCHITECTURE com setup, decisões, endpoints, filas, processos, invariantes, riscos e comandos reais de verificação, sem material de estudo pessoal.
+- [x] 10.3 Executar migration `up -> down -> up`, typecheck, build e todas as suítes unitárias, integração LocalStack/PostgreSQL e distribuídas em ambiente limpo.
+- [x] 10.4 Conferir requisito por requisito do README e dos seis specs, anexando a cada item o teste ou comando que o prova; qualquer lacuna volta ao grupo responsável.
+- [x] 10.5 Manter ledger de partidas dobradas, OpenTelemetry, dashboard e teste de carga fora desta mudança; incluir teste de carga somente mediante aprovação separada depois de todos os requisitos obrigatórios verdes.
+- [x] 10.6 O Supervisor (qwen3.8-max / max / somente leitura) realiza a revisão final de spec, diff e evidências; após `APROVADO`, o Coordenador confere `andredw13L`, cria o commit final e só publica se essa ação continuar autorizada.
