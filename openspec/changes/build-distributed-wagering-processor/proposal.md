@@ -4,7 +4,7 @@ O desafio exige um processador financeiro distribuído que permaneça correto so
 
 ## What Changes
 
-- Inicializar a aplicação Bun/NestJS, PostgreSQL 16 e SQS/LocalStack com configuração validada, migrations reversíveis e health checks separados.
+- Inicializar a aplicação Bun/NestJS, PostgreSQL 18 e SQS/LocalStack com configuração validada, migrations reversíveis e health checks separados.
 - Modelar Money, Wallet, WagerTransaction, WalletLedgerEntry, Inbox, Outbox e Integration events com invariantes encapsuladas.
 - Expor criação, consulta, ledger e reconciliação de Wallets e submissão/consulta de BET, WIN, LOSS, REFUND e ROLLBACK.
 - Garantir idempotência persistente, replay fiel, lock por Wallet e atomicidade entre saldo, Ledger, Inbox e Outbox.
@@ -32,7 +32,7 @@ Nenhuma. O repositório ainda não possui especificações de implementação.
 ## Impact
 
 - Novo serviço NestJS executado, instalado e testado pelo Bun.
-- Novo schema PostgreSQL com cinco tabelas, enums, constraints, índices e migration reversível.
+- Novo schema PostgreSQL 18 com cinco tabelas, enums, constraints, índices e migration reversível; IDs internos usam `uuidv7()` nativo.
 - Novas filas `wager-transactions.fifo`, `wager-transactions-dlq.fifo` e `wager-events.fifo` no LocalStack.
 - Novos endpoints HTTP financeiros, de health e métricas.
 - Dependências principais: MikroORM 7, decimal.js, AWS SDK v3, class-validator, Terminus, nestjs-pino e prom-client.

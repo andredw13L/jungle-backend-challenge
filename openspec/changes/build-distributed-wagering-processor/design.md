@@ -22,6 +22,10 @@ O repositório contém apenas o enunciado e a configuração inicial do OpenSpec
 
 ## Decisões
 
+### PostgreSQL e identificadores
+
+Usaremos PostgreSQL 18, que fornece `uuidv7()` nativo. IDs internos serão armazenados no tipo `uuid` e gerados pelo banco; `uuidv7()` melhora a localidade dos índices por ser temporalmente ordenado. A unicidade da Wallet continua sendo a constraint composta `(playerId, currency)`, independentemente do formato do ID.
+
 ### Módulos e interfaces
 
 O código será organizado por funcionalidade (`wallets`, `wagering`, `messaging`, `health`, `auth`, `observability`) com tipos compartilhados em `domain` e persistência em `infrastructure`. O módulo profundo `ProcessWager` expõe uma única interface para HTTP e SQS e esconde idempotência, transação, bloqueio, Ledger, Inbox e Outbox. Não haverá portas de repositório com uma única implementação; os módulos de aplicação usam o `EntityManager` transacional e são testados com PostgreSQL real.

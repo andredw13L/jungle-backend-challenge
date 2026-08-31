@@ -2,7 +2,7 @@ schema: spec-driven
 
 context: |
   Source of truth: the repository README; conflicts are resolved in its favor.
-  Stack: Bun 1.x, strict TypeScript, NestJS 10, MikroORM 7, PostgreSQL 16,
+  Stack: Bun 1.x, strict TypeScript, NestJS 10, MikroORM 7, PostgreSQL 18,
   AWS SQS through LocalStack 3.8.1, Docker Compose and bun:test.
   Financial values are decimal strings in code and NUMERIC(18,2) in PostgreSQL.
   Correctness must hold across at least three application processes.
