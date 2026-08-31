@@ -223,7 +223,7 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 - [x] 9.4 [Provar recuperação depois da confirmação e antes da confirmação no SQS] Encerrar um processo após commit e antes do ack, reiniciar e provar redelivery sem efeito duplicado.
 - [x] 9.5 [Provar publicação concorrente da Outbox; Provar recuperação de reversão fora de ordem; Provar consistência após reinicialização] Cobrir dois publishers, reversão antes da referência e reinicialização com estado persistido.
 - [x] 9.6 [Afirmar a invariante financeira final] Ao final de cada cenário, consultar Wallet, Ledger, WagerTransaction, Inbox e Outbox e afirmar saldo, cardinalidade e versões exatas.
-- [ ] 9.7 Executar a suíte distribuída completa; o Supervisor só aprova com três PIDs/portas e consultas finais registradas, então o Coordenador faz preflight Git e commit.
+- [x] 9.7 Executar a suíte distribuída completa; o Supervisor só aprova com três PIDs/portas e consultas finais registradas, então o Coordenador faz preflight Git e commit.
 
 ## 10. Entrega reproduzível
 
