@@ -196,11 +196,11 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 
 **Depende de:** grupo 5.
 
-- [ ] 7.1 [Consumir comandos SQS pelo processador compartilhado] Implementar recepção FIFO com lote até 10, long polling de 20 s, visibility timeout de 60 s configurável e encaminhamento ao mesmo `ProcessWager.execute()` usado pelo HTTP.
-- [ ] 7.2 [Consumir comandos SQS pelo processador compartilhado] Agrupar o lote por Wallet, processar sequencialmente dentro do grupo e permitir paralelismo somente entre Wallets diferentes.
-- [ ] 7.3 [Deduplicar entregas com Inbox transacional] Persistir Inbox e efeito financeiro na mesma transação, confirmando a mensagem apenas depois do commit.
-- [ ] 7.4 [Classificar falhas para confirmação e redirecionamento] Confirmar resultados de negócio, repetir falhas transitórias e deixar falhas inválidas/permanentes chegarem à DLQ após cinco recebimentos.
-- [ ] 7.5 [Encerrar a mensageria com segurança] Parar novas leituras e aguardar o trabalho em curso dentro do limite configurado.
+- [x] 7.1 [Consumir comandos SQS pelo processador compartilhado] Implementar recepção FIFO com lote até 10, long polling de 20 s, visibility timeout de 60 s configurável e encaminhamento ao mesmo `ProcessWager.execute()` usado pelo HTTP.
+- [x] 7.2 [Consumir comandos SQS pelo processador compartilhado] Agrupar o lote por Wallet, processar sequencialmente dentro do grupo e permitir paralelismo somente entre Wallets diferentes.
+- [x] 7.3 [Deduplicar entregas com Inbox transacional] Persistir Inbox e efeito financeiro na mesma transação, confirmando a mensagem apenas depois do commit.
+- [x] 7.4 [Classificar falhas para confirmação e redirecionamento] Confirmar resultados de negócio, repetir falhas transitórias e deixar falhas inválidas/permanentes chegarem à DLQ após cinco recebimentos.
+- [x] 7.5 [Encerrar a mensageria com segurança] Parar novas leituras e aguardar o trabalho em curso dentro do limite configurado.
 - [ ] 7.6 [Verificar integração com PostgreSQL e SQS] Executar no LocalStack testes de redelivery, novo messageId, conflito idempotente, DLQ e shutdown; o Supervisor aprova e o Coordenador faz preflight Git e commit.
 
 ## 8. Publicação Outbox e observabilidade

@@ -27,6 +27,7 @@ const EnvSchema = z.object({
   SQS_MAX_MESSAGES: z.coerce.number().int().min(1).max(10).default(10),
   SQS_WAIT_SECONDS: z.coerce.number().int().min(0).max(20).default(20),
   SQS_VISIBILITY_SECONDS: z.coerce.number().int().min(1).max(43200).default(60),
+  CONSUMER_DLQ_MAX_RECEIVES: z.coerce.number().int().min(1).max(100).default(5),
   RETRY_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(32).default(8),
   RETRY_BASE_SECONDS: z.coerce.number().int().min(1).max(60).default(1),
   RETRY_MAX_SECONDS: z.coerce.number().int().min(1).max(3600).default(60),

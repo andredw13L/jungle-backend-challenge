@@ -38,6 +38,15 @@ export function serializeHttpRequest(request: {
           return 'info';
         },
         serializers: { req: serializeHttpRequest },
+        // Safe logging: never emit financial payloads, tokens or credentials.
+        redact: {
+          paths: [
+            'req.body', 'body', 'payload',
+            'amount', 'money', 'balance', '*.amount', '*.money', '*.balance',
+            'password', 'token', 'secret', 'authorization', 'accessToken',
+          ],
+          censor: '[REDACTED]',
+        },
       },
     }),
   ],
