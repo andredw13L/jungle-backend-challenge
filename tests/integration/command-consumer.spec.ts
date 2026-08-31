@@ -16,6 +16,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import {
   ChangeMessageVisibilityCommand,
+  DeleteMessageCommand,
   GetQueueAttributesCommand,
   PurgeQueueCommand,
   ReceiveMessageCommand,
@@ -93,8 +94,54 @@ async function purgeQueues(): Promise<void> {
       // queue may already be empty
     }
   }
-  // LocalStack applies purges asynchronously; give it a beat.
-  await new Promise((r) => setTimeout(r, 200));
+  // LocalStack PurgeQueue is asynchronous and ApproximateNumber* lags.
+  // Actively drain any stragglers (including in-flight that become visible
+  // after the 1s VisibilityTimeout) so the next test never sees a stale
+  // message with a now-deleted walletId.
+  const deadline = Date.now() + 6000;
+  while (Date.now() < deadline) {
+    const depths = await Promise.all(
+      [commandQueue, dlqUrl].map(async (url) => {
+        const r = await sqs.send(new GetQueueAttributesCommand({
+          QueueUrl: url,
+          AttributeNames: ['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible'],
+        }));
+        return Number(r.Attributes?.ApproximateNumberOfMessages ?? 0) +
+          Number(r.Attributes?.ApproximateNumberOfMessagesNotVisible ?? 0);
+      }),
+    );
+    // Aggressively receive-and-delete any message that is currently
+    // visible, regardless of what ApproximateNumber says.
+    for (const url of [commandQueue, dlqUrl]) {
+      for (let i = 0; i < 5; i++) {
+        const res = await sqs.send(new ReceiveMessageCommand({
+          QueueUrl: url,
+          MaxNumberOfMessages: 10,
+          WaitTimeSeconds: 0,
+          VisibilityTimeout: 0,
+          AttributeNames: ['All'],
+        }));
+        const msgs = res.Messages ?? [];
+        if (msgs.length === 0) break;
+        for (const m of msgs) if (m.ReceiptHandle) {
+          try { await sqs.send(new DeleteMessageCommand({ QueueUrl: url, ReceiptHandle: m.ReceiptHandle })); } catch {}
+        }
+      }
+    }
+    if (depths.every((depth) => depth === 0)) {
+      // Double-check with a drained receive — counts can be stale zero.
+      let drained = 0;
+      for (const url of [commandQueue, dlqUrl]) {
+        const r = await sqs.send(new ReceiveMessageCommand({ QueueUrl: url, MaxNumberOfMessages: 10, WaitTimeSeconds: 0 }));
+        drained += r.Messages?.length ?? 0;
+        for (const m of r.Messages ?? []) if (m.ReceiptHandle) {
+          try { await sqs.send(new DeleteMessageCommand({ QueueUrl: url, ReceiptHandle: m.ReceiptHandle })); } catch {}
+        }
+      }
+      if (drained === 0) return;
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
 }
 
 async function createWalletWithBalance(playerId: string, amount: string): Promise<string> {
@@ -128,8 +175,17 @@ function wagerBody(overrides: Partial<Record<string, unknown>> = {}): string {
 
 async function sendCommand(body: string, groupId: string, bodyMessageId?: string): Promise<string> {
   const res = await sqs.send(
-    new SendMessageCommand({ QueueUrl: commandQueue, MessageBody: body, MessageGroupId: groupId }),
+    new SendMessageCommand({
+      QueueUrl: commandQueue,
+      MessageBody: body,
+      MessageGroupId: groupId,
+      // ponytail: explicit random dedup id — ContentBasedDeduplication=true dedupes on
+      // body hash; random id guarantees no 5-min dedup window hit across rapid tests.
+      MessageDeduplicationId: crypto.randomUUID(),
+    }),
   );
+  // LocalStack FIFO can lag between Send and Receive visibility.
+  await new Promise((r) => setTimeout(r, 1200));
   if (bodyMessageId) return bodyMessageId;
   try {
     return (JSON.parse(body) as { messageId: string }).messageId;
@@ -232,7 +288,24 @@ describe('slice 7 — SQS command consumer', () => {
     const messageId = await sendCommand(body, wid);
 
     const consumer = makeConsumer();
-    await consumer.pollOnce();
+    // LocalStack FIFO visibility is Eventually Consistent; retry pollOnce
+    // until the inbox row appears with processed_at set.
+    const deadline = Date.now() + 12000;
+    let found = false;
+    while (Date.now() < deadline) {
+      await consumer.pollOnce();
+      const r = await inboxRow(messageId);
+      if (r?.processed_at) { found = true; break; }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    if (!found) {
+      // Diagnostic: show what the inbox row looks like at timeout.
+      const diag = await inboxRow(messageId);
+      throw new Error(
+        `scenario 1 timeout: inbox row = ${JSON.stringify(diag)}; ` +
+        `commandDepth = ${await commandDepth()}`,
+      );
+    }
 
     // ack: nothing left in the queue
     expect(await commandDepth()).toBe(0);
@@ -298,7 +371,13 @@ describe('slice 7 — SQS command consumer', () => {
 
     // Receive once and process WITHOUT acking (simulates crash between
     // commit and ack), then make the message visible again (redelivery).
-    const first = await receiveOne();
+    // Retry receive briefly — LocalStack may lag after Send.
+    let first: SqsMessage | null = null;
+    for (let i = 0; i < 5; i++) {
+      first = await receiveOne();
+      if (first) break;
+      await new Promise((r) => setTimeout(r, 300));
+    }
     expect(first).not.toBeNull();
     const messageId = (JSON.parse(body) as { messageId: string }).messageId;
 
@@ -315,7 +394,13 @@ describe('slice 7 — SQS command consumer', () => {
 
     // Second delivery of the SAME messageId → duplicate, acked, no new effect.
     const consumer = makeConsumer(handler);
-    await consumer.pollOnce();
+    const d2 = Date.now() + 8000;
+    while (Date.now() < d2) {
+      await consumer.pollOnce();
+      const r = await inboxRow(messageId);
+      if (r && r.received_count >= 2 && r.processed_at) break;
+      await new Promise((rr) => setTimeout(rr, 200));
+    }
 
     expect(await commandDepth()).toBe(0); // acked this time
     const row = await inboxRow(messageId);

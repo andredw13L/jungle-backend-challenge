@@ -24,10 +24,10 @@ export function createOrm(
     driverOptions: {
       ssl: env.DATABASE_SSL ? { rejectUnauthorized: false } : false,
     },
-    // 25 connections per process: the distributed suite (slice 9) races 20
-    // concurrent wagers across three instances against one wallet, and the
-    // default 10 would starve the shared transaction under that load.
-    pool: { max: 25 },
+    // Three application instances plus the test process share one PostgreSQL.
+    // Ten connections per process keeps that deployment below PostgreSQL's
+    // default 100-connection limit; excess requests wait in the pool.
+    pool: { max: 10 },
     entities: ORM_ENTITIES,
     connect: false,
     ensureDatabase: false,

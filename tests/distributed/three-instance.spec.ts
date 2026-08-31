@@ -14,6 +14,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import {
   GetQueueAttributesCommand,
+  ReceiveMessageCommand,
+  DeleteMessageCommand,
   PurgeQueueCommand,
   type SQSClient,
 } from '@aws-sdk/client-sqs';
@@ -50,8 +52,28 @@ async function resetSharedState(): Promise<void> {
       // queue may already be empty
     }
   }
-  // LocalStack applies purges asynchronously; give it a beat.
-  await new Promise((r) => setTimeout(r, 300));
+  // LocalStack applies purges asynchronously; actively drain visible messages
+  // so stale commands cannot contaminate the next scenario.
+  const urls = [env.QUEUE_COMMAND, env.QUEUE_COMMAND_DLQ].map((n) => queueUrl(env, n));
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    let drained = 0;
+    for (const url of urls) {
+      const received = await sqs.send(new ReceiveMessageCommand({
+        QueueUrl: url,
+        MaxNumberOfMessages: 10,
+        VisibilityTimeout: 0,
+        WaitTimeSeconds: 0,
+      }));
+      for (const message of received.Messages ?? []) {
+        if (message.ReceiptHandle) {
+          await sqs.send(new DeleteMessageCommand({ QueueUrl: url, ReceiptHandle: message.ReceiptHandle }));
+          drained++;
+        }
+      }
+    }
+    if (drained === 0) break;
+  }
 }
 
 /** Wait until the command queues hold no visible and no in-flight messages. */
