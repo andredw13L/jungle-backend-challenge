@@ -201,7 +201,7 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 - [x] 7.3 [Deduplicar entregas com Inbox transacional] Persistir Inbox e efeito financeiro na mesma transação, confirmando a mensagem apenas depois do commit.
 - [x] 7.4 [Classificar falhas para confirmação e redirecionamento] Confirmar resultados de negócio, repetir falhas transitórias e deixar falhas inválidas/permanentes chegarem à DLQ após cinco recebimentos.
 - [x] 7.5 [Encerrar a mensageria com segurança] Parar novas leituras e aguardar o trabalho em curso dentro do limite configurado.
-- [ ] 7.6 [Verificar integração com PostgreSQL e SQS] Executar no LocalStack testes de redelivery, novo messageId, conflito idempotente, DLQ e shutdown; o Supervisor aprova e o Coordenador faz preflight Git e commit.
+- [x] 7.6 [Verificar integração com PostgreSQL e SQS] Executar no LocalStack testes de redelivery, novo messageId, conflito idempotente, DLQ e shutdown; o Supervisor aprova e o Coordenador faz preflight Git e commit.
 
 ## 8. Publicação Outbox e observabilidade
 
