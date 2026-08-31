@@ -1,4 +1,4 @@
-ficar# Adiar a autenticação para um provedor externo de identidade
+# Adiar a autenticação para um provedor externo de identidade
 
 ## Decisão
 
