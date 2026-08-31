@@ -103,6 +103,56 @@ describe('Task 3 wager contract', () => {
     }).success).toBe(true);
   });
 
+  test('rejects an empty or oversized HTTP idempotency key before processing', async () => {
+    let called = false;
+    const controller = new WageringController(
+      { execute: async () => { called = true; throw new Error('must not execute'); } } as never,
+      { findByIdPublic: async () => null } as never,
+    );
+    const body = {
+      providerId: 'provider-a',
+      externalTransactionId: 'transaction-123',
+      playerId: '0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1',
+      walletId: '0192f291-27dd-7d3f-8071-5f8685deef37',
+      roundId: 'round-987',
+      gameId: 'fortune-chimp',
+      kind: 'BET',
+      money: { amount: '25.00', currency: 'BRL' },
+    };
+
+    await expect(controller.submit(body, '')).rejects.toMatchObject({ response: { code: 'INVALID_PAYLOAD' } });
+    await expect(controller.submit(body, 'x'.repeat(257))).rejects.toMatchObject({ response: { code: 'INVALID_PAYLOAD' } });
+    expect(called).toBe(false);
+  });
+
+  test('records the transaction outcome for the HTTP adapter', async () => {
+    const outcomes: string[] = [];
+    const controller = new (WageringController as unknown as new (...args: unknown[]) => WageringController)(
+      {
+        execute: async () => ({
+          transactionId: '0192f298-345e-7e38-af88-e43f851a819d',
+          status: 'PROCESSED' as const,
+          idempotentReplay: false,
+        }),
+      },
+      { findByIdPublic: async () => null },
+      { recordInboxReceived: (outcome: string) => outcomes.push(outcome) },
+    );
+
+    await controller.submit({
+      providerId: 'provider-a',
+      externalTransactionId: 'transaction-123',
+      playerId: '0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1',
+      walletId: '0192f291-27dd-7d3f-8071-5f8685deef37',
+      roundId: 'round-987',
+      gameId: 'fortune-chimp',
+      kind: 'BET',
+      money: { amount: '25.00', currency: 'BRL' },
+    }, 'key-1');
+
+    expect(outcomes).toEqual(['processed']);
+  });
+
   test('serializes a typed event with aggregateId, version, and readonly data envelope', () => {
     const event = new WagerTransactionProcessed(
       'evt-1',

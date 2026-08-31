@@ -1,14 +1,14 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
-  ChangeMessageVisibilityCommand,
   DeleteMessageCommand,
+  GetQueueAttributesCommand,
   ReceiveMessageCommand,
   type Message,
   type SQSClient,
 } from '@aws-sdk/client-sqs';
 import type { AppEnv } from '../config/env';
 import { queueUrl } from './sqs.client';
-import type { CommandMessageHandler, HandleAction } from './command-message-handler';
+import { CommandMessageHandler, type HandleAction } from './command-message-handler';
 import { ConsumerShutdown } from './consumer-shutdown';
 import { MetricsService } from '../observability/metrics.service';
 
@@ -25,23 +25,28 @@ export interface LoggerLike {
 /**
  * CommandConsumer — long-polls `wager-transactions.fifo`, groups the batch by
  * walletId, and processes groups concurrently while preserving FIFO order
- * within each group. It ack/redelivers/DLQ-redirects based on the handler's
- * outcome. No work-queue library: a per-group promise chain is all we need.
+ * within each group. It acks successful outcomes and leaves failures for
+ * the queue redrive policy. No work-queue library: a per-group promise chain
+ * is all we need.
  */
 @Injectable()
 export class CommandConsumer {
   private readonly queueUrl: string;
-  private inflight = 0;
+  private readonly dlqUrl: string;
 
   constructor(
     @Inject('SQS_CLIENT') private readonly client: SQSClient,
     @Inject('APP_ENV') private readonly env: AppEnv,
-    private readonly handler: CommandMessageHandler,
-    private readonly shutdown: ConsumerShutdown,
-    private readonly metrics: MetricsService,
+    // Explicit tokens: emitDecoratorMetadata compiles the interface-typed
+    // `LoggerLike` param to `Object`, and the module aliases `Object` to the
+    // Logger — without @Inject, the handler would resolve to Logger too.
+    @Inject(CommandMessageHandler) private readonly handler: CommandMessageHandler,
+    @Inject(ConsumerShutdown) private readonly shutdown: ConsumerShutdown,
+    @Inject(MetricsService) private readonly metrics: MetricsService,
     private readonly logger: LoggerLike,
   ) {
     this.queueUrl = queueUrl(this.env, this.env.QUEUE_COMMAND);
+    this.dlqUrl = queueUrl(this.env, this.env.QUEUE_COMMAND_DLQ);
   }
 
   /** Blocking polling loop; returns when shutdown is signalled. */
@@ -76,9 +81,17 @@ export class CommandConsumer {
       this.logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'sqs receive failed');
       return;
     }
-    if (messages.length > 0) {
-      await this.processBatch(messages);
+    if (this.shutdown.isShuttingDown()) {
+      this.logger.debug({ count: messages.length }, 'received batch after shutdown — leaving unacknowledged');
+      return;
     }
+    if (messages.length > 0) {
+      this.logger.debug({ count: messages.length }, 'received batch');
+      await this.processBatch(messages);
+    } else {
+      this.logger.debug({}, 'receive returned empty');
+    }
+    await this.refreshDlqDepth();
   }
 
   /**
@@ -102,19 +115,18 @@ export class CommandConsumer {
   }
 
   private async processMessage(message: SqsMessage): Promise<void> {
-    this.inflight++;
     this.shutdown.beginWork();
-    this.metrics.setConsumerInflight(this.inflight);
     try {
       const action = await this.handler.process(message);
       await this.applyAction(message, action);
     } catch (err) {
       // Ack/visibility failure: leave the message to the visibility timeout.
-      this.logger.warn({ messageId: message.MessageId }, 'sqs ack failed — will be redelivered');
+      this.logger.warn(
+        { messageId: message.MessageId, err: err instanceof Error ? err.message : String(err) },
+        'sqs ack failed — will be redelivered',
+      );
     } finally {
-      this.inflight--;
       this.shutdown.endWork();
-      this.metrics.setConsumerInflight(this.inflight);
     }
   }
 
@@ -124,25 +136,27 @@ export class CommandConsumer {
       await this.client.send(
         new DeleteMessageCommand({ QueueUrl: this.queueUrl, ReceiptHandle: message.ReceiptHandle }),
       );
-    } else if (action === 'redirect-dlq') {
-      // Make it visible again immediately so SQS's redrive policy (max
-      // receive count) routes it to the DLQ quickly.
-      await this.client.send(
-        new ChangeMessageVisibilityCommand({
-          QueueUrl: this.queueUrl,
-          ReceiptHandle: message.ReceiptHandle,
-          VisibilityTimeout: 0,
-        }),
-      );
     }
     // 'redeliver' → leave untouched; visibility timeout redelivers.
+  }
+
+  private async refreshDlqDepth(): Promise<void> {
+    try {
+      const result = await this.client.send(new GetQueueAttributesCommand({
+        QueueUrl: this.dlqUrl,
+        AttributeNames: ['ApproximateNumberOfMessages'],
+      }));
+      this.metrics.setConsumerDlqDepth(Number(result.Attributes?.ApproximateNumberOfMessages ?? 0));
+    } catch (err) {
+      this.logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'sqs dlq depth unavailable');
+    }
   }
 }
 
 function walletKey(message: SqsMessage): string | null {
   try {
-    const body = JSON.parse(message.Body ?? '') as { walletId?: unknown };
-    return typeof body.walletId === 'string' ? body.walletId : null;
+    const body = JSON.parse(message.Body ?? '') as { data?: { walletId?: unknown } };
+    return typeof body.data?.walletId === 'string' ? body.data.walletId : null;
   } catch {
     return null;
   }

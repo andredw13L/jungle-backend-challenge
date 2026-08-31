@@ -108,24 +108,36 @@ async function createWalletWithBalance(playerId: string, amount: string): Promis
 
 function wagerBody(overrides: Partial<Record<string, unknown>> = {}): string {
   return JSON.stringify({
-    kind: 'BET',
-    idempotencyKey: `it-${crypto.randomUUID()}`,
-    providerId: 'prov-sqs',
-    externalTransactionId: `ext-${crypto.randomUUID()}`,
-    playerId: ALICE,
-    walletId: '00000000-0000-7000-8000-000000000000',
-    roundId: 'round-sqs',
-    gameId: 'game-sqs',
-    money: { amount: '10.00', currency: 'BRL' },
-    ...overrides,
+    messageId: `msg-${crypto.randomUUID()}`,
+    type: 'WagerTransactionRequested',
+    occurredAt: new Date().toISOString(),
+    data: {
+      kind: 'BET',
+      idempotencyKey: `it-${crypto.randomUUID()}`,
+      providerId: 'prov-sqs',
+      externalTransactionId: `ext-${crypto.randomUUID()}`,
+      playerId: ALICE,
+      walletId: '00000000-0000-7000-8000-000000000000',
+      roundId: 'round-sqs',
+      gameId: 'game-sqs',
+      money: { amount: '10.00', currency: 'BRL' },
+      ...overrides,
+    },
   });
 }
 
-async function sendCommand(body: string, groupId: string): Promise<string> {
+async function sendCommand(body: string, groupId: string, bodyMessageId?: string): Promise<string> {
   const res = await sqs.send(
     new SendMessageCommand({ QueueUrl: commandQueue, MessageBody: body, MessageGroupId: groupId }),
   );
-  return res.MessageId!;
+  if (bodyMessageId) return bodyMessageId;
+  try {
+    return (JSON.parse(body) as { messageId: string }).messageId;
+  } catch {
+    // Invalid bodies have no envelope identity; use the broker identity.
+    if (!res.MessageId) throw new Error('SQS did not return MessageId');
+    return res.MessageId;
+  }
 }
 
 async function commandDepth(): Promise<number> {
@@ -234,10 +246,49 @@ describe('slice 7 — SQS command consumer', () => {
 
     const tx = await admin.query(
       `SELECT status, type FROM wager_transactions WHERE idempotency_key = $1`,
-      [JSON.parse(body).idempotencyKey],
+      [(JSON.parse(body) as { data: { idempotencyKey: string } }).data.idempotencyKey],
     );
     expect(tx.rows[0].status).toBe('PROCESSED');
     expect(tx.rows[0].type).toBe('BET');
+  }, 15000);
+
+  test('shared transaction rolls back Inbox, wager, wallet, ledger, and outbox together', async () => {
+    const wid = await createWalletWithBalance(ALICE, '100.00');
+    const body = wagerBody({ walletId: wid, playerId: ALICE });
+    const beforeOutbox = await admin.query(
+      `SELECT count(*)::int AS count
+       FROM outbox WHERE payload->'data'->>'walletId' = $1::text`,
+      [wid],
+    );
+    const failingInbox = Object.create(inboxRepo) as InboxRepository;
+    failingInbox.markProcessed = async () => {
+      throw new WagerInfrastructureError(new Error('commit boundary failure'));
+    };
+    const handler = new CommandMessageHandler(ormProvider, failingInbox, processWager, metrics, env, logger);
+
+    const action = await handler.process({
+      MessageId: 'transport-id',
+      Body: body,
+      ReceiptHandle: 'receipt-id',
+    });
+
+    expect(action).toBe('redeliver');
+    const state = await admin.query(
+      `SELECT
+         (SELECT balance_amount FROM wallets WHERE id = $1) AS balance,
+         (SELECT count(*)::int FROM wager_transactions WHERE type <> 'OPENING') AS wagers,
+         (SELECT count(*)::int FROM wallet_ledger_entries WHERE wallet_id = $1 AND transaction_id IN (SELECT id FROM wager_transactions WHERE type <> 'OPENING')) AS ledger,
+         (SELECT count(*)::int FROM outbox WHERE payload->'data'->>'walletId' = $1::text) AS outbox,
+         (SELECT count(*)::int FROM inbox) AS inbox`,
+      [wid],
+    );
+    expect(state.rows[0]).toEqual({
+      balance: '100.00',
+      wagers: 0,
+      ledger: 0,
+      outbox: beforeOutbox.rows[0].count,
+      inbox: 0,
+    });
   }, 15000);
 
   test('scenario 2: same messageId redelivered → inbox dedup, one financial effect, ack', async () => {
@@ -249,7 +300,7 @@ describe('slice 7 — SQS command consumer', () => {
     // commit and ack), then make the message visible again (redelivery).
     const first = await receiveOne();
     expect(first).not.toBeNull();
-    const messageId = first!.MessageId!;
+    const messageId = (JSON.parse(body) as { messageId: string }).messageId;
 
     const handler = makeHandler();
     const action = await handler.process(first!);
@@ -281,8 +332,7 @@ describe('slice 7 — SQS command consumer', () => {
   test('scenario 3: new messageId + same idempotencyKey → replay, no duplicate effect, both acked', async () => {
     const wid = await createWalletWithBalance(ALICE, '100.00');
     const idempotencyKey = `shared-${crypto.randomUUID()}`;
-    // Identical business payload on both sends — only transport metadata
-    // (correlationId) differs, so the business body hash is unchanged.
+    // Identical business payload on both sends, but distinct envelope IDs.
     const externalTransactionId = `ext-${crypto.randomUUID()}`;
     const body1 = wagerBody({ walletId: wid, playerId: ALICE, idempotencyKey, externalTransactionId });
     await sendCommand(body1, wid);
@@ -291,9 +341,8 @@ describe('slice 7 — SQS command consumer', () => {
     await consumer.pollOnce();
     expect(await commandDepth()).toBe(0);
 
-    // Same business payload, different transport (correlationId) → SQS sees
-    // new content and issues a NEW messageId; business body hash is unchanged.
-    const body2 = wagerBody({ walletId: wid, playerId: ALICE, idempotencyKey, externalTransactionId, correlationId: 'transport-2' });
+    // Same business payload with a distinct envelope ID; business hash is unchanged.
+    const body2 = wagerBody({ walletId: wid, playerId: ALICE, idempotencyKey, externalTransactionId });
     const messageId2 = await sendCommand(body2, wid);
     const deadline = Date.now() + 10000;
     while (Date.now() < deadline && !(await inboxRow(messageId2))?.processed_at) {
@@ -328,7 +377,7 @@ describe('slice 7 — SQS command consumer', () => {
     const dlqMetric = await metrics.consumerDlq.get();
     expect(dlqMetric.values[0]!.value).toBeGreaterThan(0);
     const row = await inboxRow(messageId);
-    expect(row!.received_count).toBeGreaterThan(5);
+    expect(row!.received_count).toBeGreaterThanOrEqual(5);
     // never processed, never a financial effect
     expect(row!.processed_at).toBeNull();
     const nonOpening = await admin.query(
@@ -338,19 +387,29 @@ describe('slice 7 — SQS command consumer', () => {
   }, 40000);
 
   test('scenario 5: malformed JSON → permanent, lands in DLQ, no financial effect', async () => {
-    await sendCommand('{not-valid-json{{{', 'malformed-group');
+    const queueAttributes = await sqs.send(new GetQueueAttributesCommand({
+      QueueUrl: commandQueue,
+      AttributeNames: ['RedrivePolicy'],
+    }));
+    const redrivePolicy = JSON.parse(queueAttributes.Attributes?.RedrivePolicy ?? '{}') as {
+      maxReceiveCount?: string | number;
+    };
+    expect(Number(redrivePolicy.maxReceiveCount)).toBe(5);
+
+    const malformedMessageId = await sendCommand('{not-valid-json{{{', 'malformed-group');
     await pollUntilDlq();
 
     expect(await dlqDepth()).toBeGreaterThan(0);
     const dlqMetric = await metrics.consumerDlq.get();
     expect(dlqMetric.values[0]!.value).toBeGreaterThan(0);
+    expect((await inboxRow(malformedMessageId))!.received_count).toBeGreaterThanOrEqual(5);
     const nonOpening = await admin.query(
       `SELECT count(*)::int AS c FROM wager_transactions WHERE type <> 'OPENING'`,
     );
     expect(nonOpening.rows[0].c).toBe(0);
   }, 40000);
 
-  test('scenario 6: wallet grouping — intra-group order kept, walletB commits before walletA WIN', async () => {
+  test('scenario 6: wallet grouping — intra-group order and cross-group progress', async () => {
     const walletA = await createWalletWithBalance(ALICE, '100.00');
     const walletB = await createWalletWithBalance(BOB, '100.00');
 
@@ -375,9 +434,9 @@ describe('slice 7 — SQS command consumer', () => {
     expect(win!.balance_before_amount).toBe('90.00');
 
     const betB = (await ledgerFor(walletB)).find((l) => l.direction === 'DEBIT');
+    // Cross-group progress is independent; no temporal order between wallets
+    // is promised by concurrent processing.
     expect(betB).toBeDefined();
-    // Cross-group concurrency: walletB (independent) commits before walletA WIN.
-    expect(betB!.created_at.getTime()).toBeLessThanOrEqual(win!.created_at.getTime());
 
     const balA = await admin.query(`SELECT balance_amount FROM wallets WHERE id = $1`, [walletA]);
     expect(balA.rows[0].balance_amount).toBe('95.00');
@@ -450,7 +509,7 @@ describe('slice 7 — SQS command consumer', () => {
     }
     const row = await admin.query(
       `SELECT status FROM wager_transactions WHERE idempotency_key = $1`,
-      [JSON.parse(body).idempotencyKey],
+      [(JSON.parse(body) as { data: { idempotencyKey: string } }).data.idempotencyKey],
     );
     expect(row.rows[0].status).toBe('PROCESSED');
     expect(await commandDepth()).toBe(0);

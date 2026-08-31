@@ -8,6 +8,7 @@ import type { LoggerLike } from './command-consumer';
 import { ConsumerShutdown } from './consumer-shutdown';
 import { OutboxRepository, type OutboxRow } from './outbox.repository';
 import { MetricsService } from '../observability/metrics.service';
+import { maybeInjectPrePublishFault } from './test-hooks';
 
 export type SendFailureReason = 'network' | 'throttle' | 'permanent';
 
@@ -145,7 +146,11 @@ export class OutboxPublisher {
             throw new SendFailedError(row, classifySendError(err), messageOf(err));
           }
           await this.outbox.markPublished(txEm, row.id);
-          this.metrics.recordOutboxPublished(row.event_type);
+          this.logger.log({
+            eventId: row.event_id,
+            eventType: row.event_type,
+            ...eventContext(row.payload),
+          }, 'outbox event published');
           return 'published';
         });
       } catch (err) {
@@ -168,6 +173,10 @@ export class OutboxPublisher {
   /** Returns false when shutdown aborted the send — the row stays PENDING. */
   private async sendMessage(row: OutboxRow): Promise<boolean> {
     if (this.shutdown.isShuttingDown()) return false;
+    // TEST-ONLY fault injection (slice 9.5): after the SKIP LOCKED claim,
+    // before the SendMessage. Throws when FAULT_INJECT_PRE_PUBLISH_EVENT_ID
+    // matches; the throw rolls the claim back and another cycle publishes.
+    maybeInjectPrePublishFault(row.event_id);
     await this.client.send(
       new SendMessageCommand({
         QueueUrl: this.eventsQueueUrl,
@@ -194,7 +203,12 @@ export class OutboxPublisher {
         await this.outbox.markFailed(em, failure.row.id, 86_400, failure.message);
         this.metrics.recordOutboxPublishFailure('permanent');
         this.logger.error(
-          { eventId: failure.row.event_id, eventType: failure.row.event_type, attempts: attemptsAfter },
+          {
+            eventId: failure.row.event_id,
+            eventType: failure.row.event_type,
+            attempts: attemptsAfter,
+            ...eventContext(failure.row.payload),
+          },
           'outbox event exhausted retries — left PENDING, not published',
         );
         return;
@@ -208,6 +222,7 @@ export class OutboxPublisher {
           eventType: failure.row.event_type,
           reason: failure.reason,
           nextAttemptInSeconds: delaySeconds,
+          ...eventContext(failure.row.payload),
         },
         'outbox publish failed — rescheduled',
       );
@@ -266,6 +281,35 @@ export function aggregateIdFor(payload: string): string {
 
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Extracts only safe identifiers from an event envelope; never logs payload data. */
+function eventContext(payload: string): {
+  correlationId?: string;
+  transactionId?: string;
+  walletId?: string;
+  providerId?: string;
+} {
+  try {
+    const envelope = JSON.parse(payload) as {
+      correlationId?: unknown;
+      data?: Record<string, unknown>;
+    };
+    const data = envelope.data ?? {};
+    const text = (value: unknown): string | undefined => typeof value === 'string' ? value : undefined;
+    const correlationId = text(envelope.correlationId);
+    const walletId = text(data.walletId);
+    const providerId = text(data.providerId);
+    const transactionId = text(data.transactionId) ?? text(data.wagerTransactionId);
+    return {
+      ...(correlationId ? { correlationId } : {}),
+      ...(transactionId ? { transactionId } : {}),
+      ...(walletId ? { walletId } : {}),
+      ...(providerId ? { providerId } : {}),
+    };
+  } catch {
+    return {};
+  }
 }
 
 function sleep(ms: number): Promise<void> {

@@ -4,22 +4,19 @@ import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom
 /**
  * Thin wrapper over prom-client. Keeps one registry for process metrics, the
  * reconciliation divergence counter used by the wallet read path, the
- * command-consumer counters (slice 7): inbox outcomes, DLQ redirects,
- * in-flight gauge, and processing latency; and the outbox/wallet metrics
- * (slice 8): outbox lag gauge, wallet lock conflicts, and the
- * published/failure observability counters.
+ * command-consumer counters (slice 7): inbox outcomes, DLQ depth, and
+ * processing latency; and the outbox/wallet metrics (slice 8): outbox lag,
+ * wallet lock conflicts, and publish failures.
  */
 @Injectable()
 export class MetricsService {
   readonly registry: Registry;
   readonly reconciliationDivergences: Counter<string>;
   readonly inboxReceived: Counter<string>;
-  readonly consumerDlq: Counter<string>;
-  readonly consumerInflight: Gauge<string>;
+  readonly consumerDlq: Gauge<string>;
   readonly consumerProcessingSeconds: Histogram<string>;
   readonly outboxLag: Gauge<string>;
   readonly walletLockConflicts: Counter<string>;
-  readonly outboxPublished: Counter<string>;
   readonly outboxPublishFailures: Counter<string>;
 
   constructor() {
@@ -36,14 +33,9 @@ export class MetricsService {
       labelNames: ['outcome'],
       registers: [this.registry],
     });
-    this.consumerDlq = new Counter({
-      name: 'consumer_dlq_total',
-      help: 'Messages redirected to the DLQ after exceeding CONSUMER_DLQ_MAX_RECEIVES',
-      registers: [this.registry],
-    });
-    this.consumerInflight = new Gauge({
-      name: 'consumer_inflight',
-      help: 'Messages currently being processed by the command consumer',
+    this.consumerDlq = new Gauge({
+      name: 'consumer_dlq_depth',
+      help: 'Current visible message depth reported by the command DLQ',
       registers: [this.registry],
     });
     this.consumerProcessingSeconds = new Histogram({
@@ -59,12 +51,6 @@ export class MetricsService {
     this.walletLockConflicts = new Counter({
       name: 'wallet_lock_conflicts_total',
       help: 'Wallet FOR UPDATE lock attempts that failed (55P03/NOWAIT/deadlock)',
-      registers: [this.registry],
-    });
-    this.outboxPublished = new Counter({
-      name: 'outbox_published_total',
-      help: 'Outbox events confirmed published to wager-events.fifo',
-      labelNames: ['event_type'],
       registers: [this.registry],
     });
     this.outboxPublishFailures = new Counter({
@@ -83,12 +69,8 @@ export class MetricsService {
     this.inboxReceived.inc({ outcome });
   }
 
-  recordConsumerDlq(): void {
-    this.consumerDlq.inc();
-  }
-
-  setConsumerInflight(count: number): void {
-    this.consumerInflight.set(count);
+  setConsumerDlqDepth(depth: number): void {
+    this.consumerDlq.set(depth);
   }
 
   observeConsumerProcessing(seconds: number): void {
@@ -101,10 +83,6 @@ export class MetricsService {
 
   recordWalletLockConflict(): void {
     this.walletLockConflicts.inc();
-  }
-
-  recordOutboxPublished(eventType: string): void {
-    this.outboxPublished.inc({ event_type: eventType });
   }
 
   recordOutboxPublishFailure(reason: string): void {

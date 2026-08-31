@@ -24,7 +24,10 @@ export function createOrm(
     driverOptions: {
       ssl: env.DATABASE_SSL ? { rejectUnauthorized: false } : false,
     },
-    pool: { max: 10 },
+    // 25 connections per process: the distributed suite (slice 9) races 20
+    // concurrent wagers across three instances against one wallet, and the
+    // default 10 would starve the shared transaction under that load.
+    pool: { max: 25 },
     entities: ORM_ENTITIES,
     connect: false,
     ensureDatabase: false,

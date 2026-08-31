@@ -1,11 +1,8 @@
--- Restore the 001 inbox shape so `down -> up` is a clean round-trip.
-DROP TABLE IF EXISTS inbox;
-
-CREATE TABLE inbox (
-    consumer_name text NOT NULL,
-    message_id    text NOT NULL,
-    payload       jsonb NOT NULL,
-    received_at   timestamptz NOT NULL DEFAULT now(),
-    processed_at  timestamptz,
-    PRIMARY KEY (consumer_name, message_id)
-);
+-- Restore the 001 inbox shape without dropping the table.
+ALTER TABLE inbox
+    ALTER COLUMN payload DROP DEFAULT,
+    DROP COLUMN body_hash,
+    DROP COLUMN received_count,
+    DROP COLUMN first_received_at,
+    DROP COLUMN last_received_at,
+    DROP COLUMN correlation_id;

@@ -6,6 +6,7 @@ import {
   HttpCode,
   NotFoundException,
   Param,
+  Optional,
   ParseUUIDPipe,
   Post,
   Res,
@@ -16,11 +17,11 @@ import {
 import type { Response } from 'express';
 import { NoopIdentityGuard } from '../auth/noop-identity.guard';
 import { WagerInfrastructureError } from '../domain/errors';
-import { Money } from '../domain/money';
-import { SubmitWagerSchema, type SubmitWagerDto } from './dto/submit-wager.dto';
+import { IdempotencyKeySchema, normalizeHttpWager, SubmitWagerSchema } from './dto/submit-wager.dto';
 import { ProcessWager } from './process-wager';
 import type { SubmitWagerInput } from './process-wager.types';
 import { WagerRepository } from './wager.repository';
+import { MetricsService } from '../observability/metrics.service';
 
 /**
  * WageringController — `POST /wagering/transactions` accepts commands
@@ -34,6 +35,7 @@ export class WageringController {
   constructor(
     private readonly process: ProcessWager,
     private readonly repo: WagerRepository,
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
 
   @Post('transactions')
@@ -44,10 +46,17 @@ export class WageringController {
     @Headers('x-correlation-id') correlationId?: string,
     @Res({ passthrough: true }) response?: Response,
   ) {
-    if (!idempotencyKey) {
+    if (idempotencyKey === undefined) {
       throw new UnprocessableEntityException({
         code: 'IDEMPOTENCY_KEY_REQUIRED',
         message: 'Idempotency-Key header is required',
+      });
+    }
+    const parsedIdempotencyKey = IdempotencyKeySchema.safeParse(idempotencyKey);
+    if (!parsedIdempotencyKey.success) {
+      throw new UnprocessableEntityException({
+        code: 'INVALID_PAYLOAD',
+        issues: parsedIdempotencyKey.error.issues,
       });
     }
     const parsed = SubmitWagerSchema.safeParse(body);
@@ -57,26 +66,11 @@ export class WageringController {
         issues: parsed.error.issues,
       });
     }
-    const dto = parsed.data as SubmitWagerDto;
-    const money = Money.create(dto.money);
-    const submit: SubmitWagerInput = {
-      idempotencyKey,
-      kind: dto.kind,
-      playerId: dto.playerId,
-      walletId: dto.walletId,
-      roundId: dto.roundId,
-      gameId: dto.gameId,
-      money: money.toJSON(),
-      externalTransactionId: dto.externalTransactionId,
-      providerId: dto.providerId,
-    };
-    if (correlationId) submit.correlationId = correlationId;
-    if (dto.referenceExternalTransactionId !== undefined) {
-      submit.referenceExternalTransactionId = dto.referenceExternalTransactionId;
-    }
+    const submit: SubmitWagerInput = normalizeHttpWager(parsed.data, parsedIdempotencyKey.data, correlationId);
     try {
       const result = await this.process.execute(submit);
       if (result.status === 'PENDING') response?.status(202);
+      this.metrics?.recordInboxReceived(result.idempotentReplay ? 'duplicate' : result.status.toLowerCase());
       return result;
     } catch (err) {
       if (err instanceof WagerInfrastructureError || isTransientPostgresError(err)) {

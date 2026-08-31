@@ -9,6 +9,7 @@ export const CONSUMER_NAME = 'wager-command-consumer';
 export interface InboxClaim {
   receivedCount: number;
   bodyHash: string;
+  processed: boolean;
 }
 
 /**
@@ -33,17 +34,21 @@ export class InboxRepository {
     bodyHash: string,
     correlationId: string | null,
   ): Promise<InboxClaim> {
-    const r = await em.execute<{ received_count: number; body_hash: string }[]>(
+    const r = await em.execute<{ received_count: number; body_hash: string; processed_at: Date | null }[]>(
       `INSERT INTO inbox
          (consumer_name, message_id, body_hash, received_count, first_received_at, last_received_at, correlation_id)
        VALUES (?, ?, ?, 1, now(), now(), ?)
        ON CONFLICT (consumer_name, message_id) DO UPDATE SET
          received_count = inbox.received_count + 1,
          last_received_at = now()
-       RETURNING received_count, body_hash`,
+       RETURNING received_count, body_hash, processed_at`,
       [consumerName, messageId, bodyHash, correlationId],
     );
-    return { receivedCount: r[0]!.received_count, bodyHash: r[0]!.body_hash };
+    return {
+      receivedCount: r[0]!.received_count,
+      bodyHash: r[0]!.body_hash,
+      processed: r[0]!.processed_at !== null,
+    };
   }
 
   /** Marks a delivery as successfully processed (idempotent). */

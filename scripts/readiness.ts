@@ -14,6 +14,7 @@
 import {
   CreateQueueCommand,
   GetQueueAttributesCommand,
+  SetQueueAttributesCommand,
   SQSClient,
 } from '@aws-sdk/client-sqs';
 import { Client } from 'pg';
@@ -57,14 +58,39 @@ async function checkPostgres(env: AppEnv): Promise<Check> {
 
 type QueueKind = 'command' | 'dlq' | 'events';
 
-async function ensureQueue(
+export async function ensureQueue(
   sqs: SQSClient,
   env: AppEnv,
   name: string,
   kind: QueueKind,
 ): Promise<Check> {
   try {
-    await sqs.send(new GetQueueAttributesCommand({ QueueUrl: queueUrl(env, name) }));
+    const attributes = await sqs.send(new GetQueueAttributesCommand({
+      QueueUrl: queueUrl(env, name),
+      ...(kind === 'command' ? { AttributeNames: ['RedrivePolicy'] } : {}),
+    }));
+    if (kind === 'command') {
+      const rawPolicy = attributes.Attributes?.RedrivePolicy;
+      let policy: { deadLetterTargetArn?: string; maxReceiveCount?: string | number } = {};
+      try {
+        policy = rawPolicy ? JSON.parse(rawPolicy) as typeof policy : {};
+      } catch {
+        // Treat malformed policy like a missing one and repair it below.
+      }
+      const expectedArn = `arn:aws:sqs:${env.AWS_REGION}:000000000000:${dlqNameFor(name)}`;
+      if (policy.deadLetterTargetArn !== expectedArn || Number(policy.maxReceiveCount) !== 5) {
+        await sqs.send(new SetQueueAttributesCommand({
+          QueueUrl: queueUrl(env, name),
+          Attributes: {
+            RedrivePolicy: JSON.stringify({
+              deadLetterTargetArn: expectedArn,
+              maxReceiveCount: 5,
+            }),
+          },
+        }));
+        return { name, ok: true, detail: 'updated redrive maxReceiveCount=5' };
+      }
+    }
     return { name, ok: true, detail: 'exists' };
   } catch {
     // fall through to creation
@@ -103,7 +129,7 @@ async function ensureQueue(
   }
 }
 
-function dlqNameFor(commandQueue: string): string {
+export function dlqNameFor(commandQueue: string): string {
   return commandQueue.replace(/\.fifo$/, '-dlq.fifo');
 }
 
@@ -142,4 +168,4 @@ async function main(): Promise<void> {
   if (!ok) process.exit(1);
 }
 
-await main();
+if (import.meta.main) await main();

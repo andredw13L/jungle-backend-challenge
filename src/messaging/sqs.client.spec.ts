@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { queueUrl, sqsPing } from './sqs.client';
+import { queueUrl, sqsPing, SqsClientShutdown } from './sqs.client';
 import type { AppEnv } from '../config/env';
 
 /**
@@ -53,5 +53,13 @@ describe('sqs.client', () => {
     } as unknown as Parameters<typeof sqsPing>[0];
     await sqsPing(fakeClient, 'http://x/y/z');
     expect(called).toBe(true);
+  });
+
+  test('Nest shutdown hook closes the SQS client', async () => {
+    let destroyed = false;
+    const client = { destroy: () => { destroyed = true; } };
+    const hook = new SqsClientShutdown(client as never);
+    await hook.onApplicationShutdown('SIGTERM');
+    expect(destroyed).toBe(true);
   });
 });

@@ -1,3 +1,4 @@
+import { Inject, Injectable, type OnApplicationShutdown } from '@nestjs/common';
 import { SQSClient, GetQueueAttributesCommand } from '@aws-sdk/client-sqs';
 import type { AppEnv } from '../config/env';
 
@@ -17,6 +18,16 @@ export function buildSqsClient(env: AppEnv): SQSClient {
     config.endpoint = env.AWS_ENDPOINT_URL;
   }
   return new SQSClient(config);
+}
+
+/** Closes the shared SDK client when Nest tears down the application. */
+@Injectable()
+export class SqsClientShutdown implements OnApplicationShutdown {
+  constructor(@Inject('SQS_CLIENT') private readonly client: SQSClient) {}
+
+  onApplicationShutdown(_signal?: string): void {
+    this.client.destroy();
+  }
 }
 
 /**

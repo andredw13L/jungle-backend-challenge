@@ -2,14 +2,13 @@ import { Global, Module } from '@nestjs/common';
 import { Logger } from 'nestjs-pino';
 import { loadEnv, type AppEnv } from '../config/env';
 import { WageringModule } from '../wagering/wagering.module';
-import { buildSqsClient } from './sqs.client';
+import { buildSqsClient, SqsClientShutdown } from './sqs.client';
 import { InboxRepository } from './inbox.repository';
 import { CommandMessageHandler } from './command-message-handler';
 import { CommandConsumer } from './command-consumer';
 import { ConsumerShutdown } from './consumer-shutdown';
 import { OutboxRepository } from './outbox.repository';
 import { OutboxPublisher } from './outbox-publisher';
-import { LockObserver } from './lock-observer';
 
 const env = loadEnv();
 
@@ -18,6 +17,7 @@ const env = loadEnv();
   imports: [WageringModule],
   providers: [
     { provide: 'SQS_CLIENT', useFactory: () => buildSqsClient(env) },
+    SqsClientShutdown,
     { provide: 'APP_ENV', useValue: env as AppEnv },
     // The consumer/handler/publisher type their logger as `LoggerLike` (an
     // interface), which emitDecoratorMetadata compiles to the `Object` token.
@@ -30,7 +30,6 @@ const env = loadEnv();
     ConsumerShutdown,
     OutboxRepository,
     OutboxPublisher,
-    LockObserver,
   ],
   exports: [
     'SQS_CLIENT',
@@ -41,7 +40,6 @@ const env = loadEnv();
     ConsumerShutdown,
     OutboxRepository,
     OutboxPublisher,
-    LockObserver,
   ],
 })
 export class SqsModule {}

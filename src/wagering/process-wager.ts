@@ -1,4 +1,4 @@
-import { Inject, Injectable, UnprocessableEntityException } from '@nestjs/common';
+import { Inject, Injectable, Optional, UnprocessableEntityException } from '@nestjs/common';
 import { IsolationLevel } from '@mikro-orm/core';
 import type { EntityManager as PostgreSqlEntityManager } from '@mikro-orm/postgresql';
 import { MIKRO_ORM } from '../infrastructure/database/entities';
@@ -18,6 +18,7 @@ import type {
   SubmitWagerResult,
 } from './process-wager.types';
 import { WagerRepository, type WagerRow, type WalletRow, wagerPayloadHash } from './wager.repository';
+import { MetricsService } from '../observability/metrics.service';
 
 /**
  * ProcessWager — the deep module from the design. Same flow handles
@@ -35,16 +36,19 @@ export class ProcessWager {
   constructor(
     @Inject(MIKRO_ORM) private readonly orm: Promise<AppOrm>,
     readonly repo: WagerRepository,
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
 
-  async execute(input: SubmitWagerInput): Promise<SubmitWagerResult> {
+  async execute(
+    input: SubmitWagerInput,
+    transactionEm?: PostgreSqlEntityManager,
+  ): Promise<SubmitWagerResult> {
     const normalized = normalizeWagerInput(input);
     const payloadHash = wagerPayloadHash(normalized);
     const txId = uuidv7();
 
     try {
-      const orm = await this.orm;
-      return await orm.em.fork().transactional(async (em) => {
+      const work = async (em: PostgreSqlEntityManager): Promise<SubmitWagerResult> => {
         // Insert-first arbitrates concurrent attempts: PostgreSQL blocks
         // any duplicate INSERT on `uq_wager_idempotency_key` until the
         // winner commits, then raises 23505. We catch that and route to
@@ -73,7 +77,16 @@ export class ProcessWager {
           return await this.processReversal(em, normalized, txId);
         }
         return await this.processBalanceChange(em, normalized, txId, normalized.walletId);
-      }, { isolationLevel: IsolationLevel.READ_COMMITTED });
+      };
+      if (transactionEm) {
+        // MikroORM uses a savepoint for a nested transactional call. The
+        // caller's Inbox transaction remains the only physical transaction.
+        return await transactionEm.transactional(work, {
+          isolationLevel: IsolationLevel.READ_COMMITTED,
+        });
+      }
+      const orm = await this.orm;
+      return await orm.em.fork().transactional(work, { isolationLevel: IsolationLevel.READ_COMMITTED });
     } catch (err) {
       if (isUniqueViolation(err, 'uq_wager_idempotency_key')) {
         return await this.replayFromPersisted(normalized, payloadHash);
@@ -177,7 +190,12 @@ export class ProcessWager {
     txId: string,
     walletId: string,
   ): Promise<SubmitWagerResult> {
-    const walletRow = await this.repo.lockWallet(em, walletId, input.playerId, input.money.currency);
+    const walletRow = await this.lockWallet(
+      em,
+      walletId,
+      input.playerId,
+      input.money.currency,
+    );
     if (!walletRow) {
       throw new UnprocessableEntityException({
         code: 'WALLET_NOT_FOUND',
@@ -336,7 +354,7 @@ export class ProcessWager {
     em: PostgreSqlEntityManager,
     input: NormalizedWagerInput,
   ): Promise<{ walletRow: WalletRow | null; referenceRow: WagerRow | null; providerMismatch: boolean }> {
-    const walletRow = await this.repo.lockWalletById(em, input.walletId);
+    const walletRow = await this.lockWalletById(em, input.walletId);
     if (!walletRow) return { walletRow: null, referenceRow: null, providerMismatch: false };
     if (input.referenceExternalTransactionId === undefined) {
       return { walletRow, referenceRow: null, providerMismatch: false };
@@ -563,6 +581,36 @@ export class ProcessWager {
     ));
     return makeResult(response, false);
   }
+
+  private async lockWallet(
+    em: PostgreSqlEntityManager,
+    walletId: string,
+    playerId: string,
+    currency: string,
+  ): Promise<WalletRow | null> {
+    try {
+      return await this.repo.lockWallet(em, walletId, playerId, currency);
+    } catch (err) {
+      this.recordLockConflict(err);
+      throw err;
+    }
+  }
+
+  private async lockWalletById(
+    em: PostgreSqlEntityManager,
+    walletId: string,
+  ): Promise<WalletRow | null> {
+    try {
+      return await this.repo.lockWalletById(em, walletId);
+    } catch (err) {
+      this.recordLockConflict(err);
+      throw err;
+    }
+  }
+
+  private recordLockConflict(err: unknown): void {
+    if (isWalletLockConflict(err)) this.metrics?.recordWalletLockConflict();
+  }
 }
 
 function normalizeWagerInput(input: SubmitWagerInput): NormalizedWagerInput {
@@ -632,10 +680,20 @@ function isTransientPostgresError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
   const error = err as { code?: string; sqlState?: string; cause?: unknown; message?: string };
   const sqlState = error.code ?? error.sqlState;
-  if (sqlState && ['40001', '08000', '08003', '08006', '57P01', '57P03'].includes(sqlState)) return true;
+  if (sqlState && ['40001', '40P01', '55P03', '08000', '08003', '08006', '57P01', '57P03'].includes(sqlState)) return true;
   if (error.cause && isTransientPostgresError(error.cause)) return true;
   return typeof error.message === 'string' &&
     /ECONNRESET|ECONNREFUSED|connection terminated/i.test(error.message);
+}
+
+function isWalletLockConflict(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const error = err as { code?: string; sqlState?: string; cause?: unknown; message?: string };
+  const sqlState = error.code ?? error.sqlState;
+  if (sqlState && ['40001', '40P01', '55P03'].includes(sqlState)) return true;
+  if (error.cause && isWalletLockConflict(error.cause)) return true;
+  return typeof error.message === 'string' &&
+    /deadlock detected|could not obtain lock|lock timeout|serialization failure/i.test(error.message);
 }
 
 function isForeignKeyViolation(err: unknown, constraint: string): boolean {

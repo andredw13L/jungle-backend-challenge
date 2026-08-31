@@ -1,4 +1,6 @@
 import { Inject, Injectable, UnprocessableEntityException } from '@nestjs/common';
+import { IsolationLevel } from '@mikro-orm/core';
+import { z } from 'zod';
 import { MIKRO_ORM } from '../infrastructure/database/entities';
 import type { AppOrm } from '../infrastructure/database/orm.module';
 import type { LoggerLike, SqsMessage } from './command-consumer';
@@ -9,39 +11,45 @@ import { WagerInfrastructureError } from '../domain/errors';
 import type { AppEnv } from '../config/env';
 import { ProcessWager } from '../wagering/process-wager';
 import { wagerPayloadHash } from '../wagering/wager.repository';
-import type { SubmitWagerInput, WagerKind } from '../wagering/process-wager.types';
+import {
+  normalizeSqsWager,
+  SqsWagerDataSchema,
+  type SqsWagerDataDto,
+} from '../wagering/dto/submit-wager.dto';
+import type { SubmitWagerInput } from '../wagering/process-wager.types';
+import { maybeInjectPostCommitFault } from './test-hooks';
 
 /**
- * SQS message body shape — see the reliable-messaging spec. Transport
- * metadata (idempotencyKey, correlationId) is excluded from the body hash
- * (same scheme as wagerPayloadHash).
+ * SQS message body shape — see README §10. The business data is validated by
+ * the same schema and normalizer used by the HTTP adapter.
  */
 export interface WagerTransactionRequested {
-  kind: WagerKind;
-  idempotencyKey: string;
-  providerId: string;
-  externalTransactionId: string;
-  playerId: string;
-  walletId: string;
-  roundId: string;
-  gameId: string;
-  money: { amount: string; currency: string };
-  referenceExternalTransactionId?: string;
-  correlationId?: string;
+  messageId: string;
+  type: 'WagerTransactionRequested';
+  occurredAt: string;
+  data: SqsWagerDataDto;
 }
 
 /** SQS action the consumer takes for a handled message. */
-export type HandleAction = 'ack' | 'redeliver' | 'redirect-dlq';
+export type HandleAction = 'ack' | 'redeliver';
+
+/** Internal signal that aborts the shared transaction but leaves SQS unacked. */
+class LeaveUnacknowledgedError extends Error {
+  constructor() {
+    super('message processing did not commit');
+    this.name = 'LeaveUnacknowledgedError';
+  }
+}
 
 /**
  * CommandMessageHandler — turns one SQS message into a business outcome
  * through the shared ProcessWager, recording delivery accounting in the
- * Inbox. Returns the SQS action: ack (business result/duplicate), redeliver
- * (transient infra — let the visibility timeout retry), or redirect-dlq
- * (permanent failure — accelerate to the DLQ).
+ * Inbox. Returns the SQS action: ack (business result/duplicate) or redeliver
+ * (transient/permanent failure — let the queue redrive policy decide).
  *
- * Slice 7 does NOT modify ProcessWager; the financial effect is arbitrated
- * by `uq_wager_idempotency_key` exactly as the HTTP path does.
+ * Inbox, ProcessWager and `markProcessed` share one READ COMMITTED
+ * transaction. The SQS acknowledgement is performed by CommandConsumer only
+ * after this method has returned successfully.
  */
 @Injectable()
 export class CommandMessageHandler {
@@ -50,67 +58,84 @@ export class CommandMessageHandler {
     private readonly inbox: InboxRepository,
     private readonly processWager: ProcessWager,
     private readonly metrics: MetricsService,
-    @Inject('APP_ENV') private readonly env: AppEnv,
+    @Inject('APP_ENV') _env: AppEnv,
     private readonly logger: LoggerLike,
   ) {}
 
   async process(message: SqsMessage): Promise<HandleAction> {
-    const messageId = message.MessageId ?? 'unknown';
+    const transportMessageId = message.MessageId ?? 'unknown';
     let parsed: WagerTransactionRequested;
     let bodyHash: string;
+    let submit!: SubmitWagerInput;
     try {
       parsed = parseMessageBody(message.Body ?? '');
-      bodyHash = businessBodyHash(parsed);
+      submit = normalizeSqsWager(parsed.data, parsed.messageId);
+      bodyHash = businessBodyHash(submit);
     } catch {
-      // Malformed / invalid payload → permanent; count toward DLQ but never
-      // invoke ProcessWager.
-      return this.permanent(messageId, payloadHash(message.Body ?? ''), null, 'INVALID_PAYLOAD');
+      // Malformed / invalid payload → leave unacknowledged. SQS redrive,
+      // rather than an application counter, decides when it reaches the DLQ.
+      return this.permanent(transportMessageId, payloadHash(message.Body ?? ''), null, 'INVALID_PAYLOAD');
     }
-    const correlationId = parsed.correlationId ?? null;
+    const messageId = parsed.messageId;
+    const correlationId = parsed.messageId;
 
     const orm = await this.orm;
-    // Durable delivery accounting (received_count, body_hash).
-    const { receivedCount, bodyHash: storedHash } = await orm.em.fork().transactional((em) =>
-      this.inbox.upsert(em, CONSUMER_NAME, messageId, bodyHash, correlationId),
-    );
-
-    // Conflicting identity: same messageId but a different body.
-    if (storedHash !== bodyHash) {
-      return this.permanentFromCount(messageId, receivedCount, 'IDEMPOTENCY_CONFLICT');
-    }
-
-    // Already processed → identical redelivery → idempotent duplicate, ack.
-    if (await this.inbox.isProcessed(CONSUMER_NAME, messageId)) {
-      this.metrics.recordInboxReceived('duplicate');
-      return 'ack';
-    }
-
-    // Not processed but received too many times → permanent DLQ redirect.
-    if (receivedCount > this.env.CONSUMER_DLQ_MAX_RECEIVES) {
-      return this.permanentFromCount(messageId, receivedCount, 'DLQ_MAX_RECEIVES');
-    }
-
     const start = performance.now();
+    let logOutcome: string | undefined;
+    let logResult: SubmitWagerInput | undefined;
     try {
-      const result = await this.processWager.execute(toSubmitWagerInput(parsed));
-      const outcome = result.idempotentReplay
-        ? 'duplicate'
-        : result.status === 'REJECTED'
-          ? 'rejected'
-          : 'processed';
-      await orm.em.fork().transactional((em) =>
-        this.inbox.markProcessed(em, CONSUMER_NAME, messageId),
-      );
-      this.metrics.recordInboxReceived(outcome);
-      this.logger.log({ messageId, outcome, transactionId: result.transactionId }, 'wager command processed');
-      return 'ack';
+      const result = await orm.em.fork().transactional(async (em) => {
+        const claim = await this.inbox.upsert(em, CONSUMER_NAME, messageId, bodyHash, correlationId);
+        if (claim.bodyHash !== bodyHash) {
+          return { action: this.permanentFromCount(messageId, claim.receivedCount, 'IDEMPOTENCY_CONFLICT', submit), result: null };
+        }
+        if (claim.processed) {
+          this.metrics.recordInboxReceived('duplicate');
+          return { action: 'ack' as const, result: null };
+        }
+        try {
+          const processed = await this.processWager.execute(submit, em);
+          await this.inbox.markProcessed(em, CONSUMER_NAME, messageId);
+          logOutcome = processed.idempotentReplay
+            ? 'duplicate'
+            : processed.status === 'REJECTED'
+              ? 'rejected'
+              : 'processed';
+          logResult = submit;
+          return { action: 'ack' as const, result: processed };
+        } catch (err) {
+          if (isTransientError(err)) {
+            this.metrics.recordInboxReceived('retried');
+            this.logger.warn({ messageId, correlationId, walletId: submit.walletId, providerId: submit.providerId }, 'transient failure — will be redelivered');
+            throw new LeaveUnacknowledgedError();
+          }
+          this.permanentFromCount(messageId, claim.receivedCount, errorCode(err) ?? 'PERMANENT', submit);
+          throw new LeaveUnacknowledgedError();
+        }
+      }, { isolationLevel: IsolationLevel.READ_COMMITTED });
+      if (logOutcome && logResult) {
+        this.metrics.recordInboxReceived(logOutcome);
+        this.logger.log({
+          messageId,
+          correlationId,
+          transactionId: result.result?.transactionId,
+          walletId: logResult.walletId,
+          providerId: logResult.providerId,
+          outcome: logOutcome,
+        }, 'wager command processed');
+      }
+      // TEST-ONLY fault injection (slice 9.4): after the shared transaction
+      // commits, before the SQS DeleteMessage.
+      if (result.action === 'ack' && result.result) await maybeInjectPostCommitFault(messageId);
+      return result.action;
     } catch (err) {
+      if (err instanceof LeaveUnacknowledgedError) return 'redeliver';
       if (isTransientError(err)) {
         this.metrics.recordInboxReceived('retried');
-        this.logger.warn({ messageId }, 'transient failure — will be redelivered');
+        this.logger.warn({ messageId, correlationId, walletId: submit.walletId, providerId: submit.providerId }, 'transient failure — will be redelivered');
         return 'redeliver';
       }
-      return this.permanentFromCount(messageId, receivedCount, errorCode(err) ?? 'PERMANENT');
+      return this.permanentFromCount(messageId, 0, errorCode(err) ?? 'PERMANENT', submit);
     } finally {
       this.metrics.observeConsumerProcessing((performance.now() - start) / 1000);
     }
@@ -124,19 +149,26 @@ export class CommandMessageHandler {
     code: string,
   ): Promise<HandleAction> {
     const orm = await this.orm;
-    const { receivedCount } = await orm.em.fork().transactional((em) =>
+    const claim = await orm.em.fork().transactional((em) =>
       this.inbox.upsert(em, CONSUMER_NAME, messageId, bodyHash, correlationId),
     );
-    return this.permanentFromCount(messageId, receivedCount, code);
+    return this.permanentFromCount(messageId, claim.receivedCount, code);
   }
 
-  private permanentFromCount(messageId: string, receivedCount: number, code: string): HandleAction {
-    this.metrics.recordInboxReceived('dlq');
-    if (receivedCount > this.env.CONSUMER_DLQ_MAX_RECEIVES) {
-      this.metrics.recordConsumerDlq();
-    }
-    this.logger.warn({ messageId, code, receivedCount }, 'permanent failure — redirecting to DLQ');
-    return 'redirect-dlq';
+  private permanentFromCount(
+    messageId: string,
+    receivedCount: number,
+    code: string,
+    input?: SubmitWagerInput,
+  ): HandleAction {
+    this.metrics.recordInboxReceived('permanent');
+    this.logger.warn({
+      messageId,
+      code,
+      receivedCount,
+      ...(input ? { correlationId: input.correlationId, walletId: input.walletId, providerId: input.providerId } : {}),
+    }, 'permanent failure — leaving unacknowledged for SQS redrive');
+    return 'redeliver';
   }
 }
 
@@ -147,70 +179,19 @@ export function parseMessageBody(raw: string): WagerTransactionRequested {
   } catch {
     throw new UnprocessableEntityException({ code: 'INVALID_PAYLOAD' });
   }
-  const b = body as Record<string, unknown>;
-  const required: (keyof WagerTransactionRequested)[] = [
-    'kind', 'idempotencyKey', 'providerId', 'externalTransactionId',
-    'playerId', 'walletId', 'roundId', 'gameId', 'money',
-  ];
-  for (const key of required) {
-    if (b[key] === undefined || b[key] === null) {
-      throw new UnprocessableEntityException({ code: 'INVALID_PAYLOAD' });
-    }
-  }
-  const money = b.money as Record<string, unknown>;
-  if (typeof money.amount !== 'string' || typeof money.currency !== 'string') {
-    throw new UnprocessableEntityException({ code: 'INVALID_PAYLOAD' });
-  }
-  return {
-    kind: b.kind as WagerKind,
-    idempotencyKey: b.idempotencyKey as string,
-    providerId: b.providerId as string,
-    externalTransactionId: b.externalTransactionId as string,
-    playerId: b.playerId as string,
-    walletId: b.walletId as string,
-    roundId: b.roundId as string,
-    gameId: b.gameId as string,
-    money: { amount: money.amount, currency: money.currency },
-    ...(b.referenceExternalTransactionId !== undefined
-      ? { referenceExternalTransactionId: b.referenceExternalTransactionId as string }
-      : {}),
-    ...(b.correlationId !== undefined ? { correlationId: b.correlationId as string } : {}),
-  };
+  const parsed = z.object({
+    messageId: z.string().min(1).max(256),
+    type: z.literal('WagerTransactionRequested'),
+    occurredAt: z.string().datetime({ offset: true }),
+    data: SqsWagerDataSchema,
+  }).strict().safeParse(body);
+  if (!parsed.success) throw new UnprocessableEntityException({ code: 'INVALID_PAYLOAD' });
+  return parsed.data;
 }
 
 /** Business-field body hash — same scheme as wagerPayloadHash. */
-export function businessBodyHash(body: WagerTransactionRequested): string {
-  return wagerPayloadHash({
-    kind: body.kind,
-    playerId: body.playerId,
-    walletId: body.walletId,
-    roundId: body.roundId,
-    gameId: body.gameId,
-    externalTransactionId: body.externalTransactionId,
-    providerId: body.providerId,
-    money: body.money,
-    ...(body.referenceExternalTransactionId !== undefined
-      ? { referenceExternalTransactionId: body.referenceExternalTransactionId }
-      : {}),
-  });
-}
-
-function toSubmitWagerInput(body: WagerTransactionRequested): SubmitWagerInput {
-  return {
-    idempotencyKey: body.idempotencyKey,
-    providerId: body.providerId,
-    externalTransactionId: body.externalTransactionId,
-    playerId: body.playerId,
-    walletId: body.walletId,
-    roundId: body.roundId,
-    gameId: body.gameId,
-    kind: body.kind,
-    money: body.money,
-    ...(body.referenceExternalTransactionId !== undefined
-      ? { referenceExternalTransactionId: body.referenceExternalTransactionId }
-      : {}),
-    ...(body.correlationId !== undefined ? { correlationId: body.correlationId } : {}),
-  };
+export function businessBodyHash(body: SubmitWagerInput): string {
+  return wagerPayloadHash(body);
 }
 
 function errorCode(err: unknown): string | null {

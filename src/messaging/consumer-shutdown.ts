@@ -11,8 +11,9 @@ import type { OutboxPublisher } from './outbox-publisher';
  * Both loops register their in-flight work against this single coordinator
  * (`beginWork`/`endWork`), so `signalShutdown()` stops new polls and
  * `waitForDrained`/`drainAll` waits for every in-flight transaction. `run()`
- * wires the drain → app.close() → exit sequence for the SIGTERM/SIGINT
- * handlers in main.ts.
+ * wires the drain → app.close() sequence for the SIGTERM/SIGINT handlers in
+ * main.ts. The exit code is returned so tests can exercise timeout behavior
+ * without terminating their runner.
  */
 @Injectable()
 export class ConsumerShutdown {
@@ -67,12 +68,13 @@ export class ConsumerShutdown {
     return this.waitForDrained(timeoutMs);
   }
 
-  /** Full drain → close → exit sequence used by the process signal handlers. */
+  /** Full drain → close sequence; main.ts applies the returned exit code. */
   async run(
     app: INestApplication,
     consumer: CommandConsumer,
     publisher?: OutboxPublisher,
-  ): Promise<void> {
+    pendingReference?: PendingReferenceStoppable,
+  ): Promise<number> {
     void consumer; // signalled via signalShutdown(); loops observe isShuttingDown()
     this.signalShutdown();
     // Let the publisher's loop observe shutdown and return (it may be
@@ -84,14 +86,27 @@ export class ConsumerShutdown {
         sleep(this.env.OUTBOX_SHUTDOWN_TIMEOUT_MS),
       ]);
     }
+    // Same for the pending-reference worker (slice 9): stop new batches and
+    // let the in-flight one finish within the shutdown budget.
+    if (pendingReference) {
+      await Promise.race([
+        pendingReference.waitForStopped(),
+        sleep(this.env.OUTBOX_SHUTDOWN_TIMEOUT_MS),
+      ]);
+    }
     const drained = await this.drainAll(this.env.SHUTDOWN_TIMEOUT_MS);
     try {
       await app.close();
     } catch {
-      process.exit(1);
+      return 1;
     }
-    process.exit(drained ? 0 : 1);
+    return drained ? 0 : 1;
   }
+}
+
+/** Minimal surface the shutdown coordinator needs from the worker loop. */
+export interface PendingReferenceStoppable {
+  waitForStopped(): Promise<void>;
 }
 
 function sleep(ms: number): Promise<void> {
