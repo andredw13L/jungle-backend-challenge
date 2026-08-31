@@ -190,7 +190,7 @@ Os grupos 4 e 5, e depois 6, 7 e 8, só podem compartilhar uma rodada paralela q
 - [x] 6.2 [Aplicar reversões integrais uma única vez] Implementar reversões travando a Wallet antes de ler a referência e persistindo resultado, Ledger e Outbox na mesma transação.
 - [x] 6.3 [Recuperar referências entregues fora de ordem] Implementar estado pendente e worker de nova tentativa com uma linha por transação, `FOR UPDATE SKIP LOCKED`, máximo 8, base 1 s e teto 60 s configuráveis.
 - [x] 6.4 [Provar recuperação de reversão fora de ordem] Testar referência posterior, concorrência entre workers, esgotamento e reinicialização com PostgreSQL real.
-- [ ] 6.5 O Supervisor revisa ordem dos locks, limites e evidências; após aprovação, o Coordenador executa o preflight Git e cria o commit.
+- [x] 6.5 O Supervisor revisa ordem dos locks, limites e evidências; após aprovação, o Coordenador executa o preflight Git e cria o commit.
 
 ## 7. Consumo SQS com Inbox e DLQ
 
